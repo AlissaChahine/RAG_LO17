@@ -1,12 +1,15 @@
 Icon*
 
-# Environnements virtuels Python
+# Environnements virtuels Python :
 .venv/
 *venv*/
 
-# Fichiers et dossiers d'environnement
+# Fichiers et dossiers d'environnement : 
 .env/
 .env
 
-# Base vectorielle Chroma générée localement
+# Chroma :
 chroma_db/
+
+# Configuration VS Code : 
+.vscode/

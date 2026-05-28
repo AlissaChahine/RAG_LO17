@@ -28,8 +28,14 @@ Dépendances / librairies
 pip install langchain-core langchain langchain-google-genai 
 pip install -U langchain-community chromadb
 
-### Configuration de la clé API : 
-To run the following cell, your API key must be stored in a Colab Secret named `GOOGLE_API_KEY`. If you don't already have an API key, or you're not sure how to create a Colab Secret, see [Authentication](https://github.com/google-gemini/cookbook/blob/main/quickstarts/Authentication.ipynb) for an example.
+### Configuration de la clé API :
+Créez un fichier `.env` à la racine du projet avec :
+
+```env
+GOOGLE_API_KEY=your_api_key_here
+```
+
+Les notebooks utilisent ensuite le module commun [api_config.py](api_config.py) pour charger cette variable d'environnement, ce qui évite d'avoir une méthode différente dans chaque notebook.
 
 ### Easy start : 
 commandes principales ...
