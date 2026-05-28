@@ -1,12 +1,12 @@
 Icon*
 
-# Environnements virtuels Python
+# Virtualenv :
 .venv/
 *venv*/
 
-# Fichiers et dossiers d'environnement
+#env
 .env/
 .env
-
-# Base vectorielle Chroma générée localement
+# Chroma DB cache
 chroma_db/
+
