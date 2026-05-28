@@ -7,3 +7,6 @@ Icon*
 # Fichiers et dossiers d'environnement
 .env/
 .env
+
+# Base vectorielle Chroma générée localement
+chroma_db/
