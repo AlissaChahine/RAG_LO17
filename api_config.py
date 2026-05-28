@@ -1,23 +1,47 @@
 import os
-
+from importlib import import_module
 from dotenv import load_dotenv
 
 
-def configure_google_api_key(env_file: str | None = None) -> str:
-    """Load GOOGLE_API_KEY from the environment or a .env file.
+def _load_key_from_colab() -> str | None:
+    try:
+        colab_module = import_module("google.colab")
+        userdata = colab_module.userdata
+    except Exception:
+        return None
 
-    Returns the API key and also exports it to os.environ so LangChain and
-    Google SDK clients can read it automatically.
+    for secret_name in ("GOOGLE_API_KEY", "api_key"):
+        try:
+            api_key = userdata.get(secret_name)
+        except Exception:
+            api_key = None
+
+        if api_key:
+            return api_key
+
+    return None
+
+
+def configure_google_api_key(env_file: str | None = ".env") -> str:
+    """Charge GOOGLE_API_KEY depuis Colab Secrets ou depuis un fichier .env local.
+
+    La fonction commence par essayer les secrets Google Colab quand ils sont
+    disponibles, puis elle se rabat sur un fichier .env local ou sur une
+    variable d'environnement déjà définie. La clé résolue est aussi écrite dans
+    os.environ pour que LangChain et les clients Google puissent l'utiliser.
     """
-    if env_file:
-        load_dotenv(env_file)
-    else:
-        load_dotenv()
+    api_key = _load_key_from_colab()
 
-    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key and env_file:
+        load_dotenv(env_file)
+        api_key = os.getenv("GOOGLE_API_KEY")
+
+    if not api_key:
+        api_key = os.getenv("GOOGLE_API_KEY")
+
     if not api_key:
         raise ValueError(
-            "GOOGLE_API_KEY non trouvée. Ajoutez-la dans un fichier .env à la racine du projet."
+            "GOOGLE_API_KEY non trouvée. Utilisez un secret Colab nommé GOOGLE_API_KEY ou créez un fichier .env à la racine du projet."
         )
 
     os.environ["GOOGLE_API_KEY"] = api_key

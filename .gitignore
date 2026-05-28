@@ -1,15 +1,29 @@
 Icon*
 
-# Environnements virtuels Python :
+# Environnements virtuels Python
 .venv/
 *venv*/
 
-# Fichiers et dossiers d'environnement : 
+# Fichiers et dossiers d'environnement 
 .env/
 .env
 
-# Chroma :
-chroma_db/
+# Fichiers d'environnement locaux fréquents
+.DS_Store
 
-# Configuration VS Code : 
+# Caches Python
+__pycache__/
+*.py[cod]
+
+# Checkpoints Jupyter
+.ipynb_checkpoints/
+
+# Chroma 
+chroma_db/
+chroma_minecraft_db_v2/
+
+# Exports générés par le notebook
+wikipedia.csv
+
+# Configuration VS Code 
 .vscode/
