@@ -3,3 +3,7 @@ Icon*
 # Virtualenv : 
 .venv/
 *venv*/
+
+#env
+.env/
+.env
