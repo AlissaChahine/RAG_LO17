@@ -1,9 +1,9 @@
 Icon*
 
-# Virtualenv :
+# Environnements virtuels Python
 .venv/
 *venv*/
 
-#env
+# Fichiers et dossiers d'environnement
 .env/
 .env
