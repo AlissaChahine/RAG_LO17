@@ -21,9 +21,13 @@ __pycache__/
 # Chroma 
 chroma_db/
 chroma_minecraft_db_v2/
+chroma_minecraft_db/
 
 # Exports générés par le notebook
 wikipedia.csv
 
 # Configuration VS Code 
 .vscode/
+
+#files créées
+files/
