@@ -1,0 +1,970 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "407fec9b",
+   "metadata": {},
+   "source": [
+    "# RAG Minecraft"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "57bdf806",
+   "metadata": {},
+   "source": [
+    "## Configuration Gemini API"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "id": "09cafaa1",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import warnings\n",
+    "warnings.filterwarnings('ignore', category=FutureWarning)\n",
+    "\n",
+    "from langchain_core.prompts import PromptTemplate\n",
+    "from langchain_core.documents import Document\n",
+    "from langchain_community.document_loaders import WebBaseLoader\n",
+    "from langchain_core.output_parsers import StrOutputParser\n",
+    "from langchain_core.prompts import format_document\n",
+    "from langchain_core.runnables import RunnablePassthrough\n",
+    "from langchain_community.vectorstores import Chroma\n",
+    "from langchain_core.stores import InMemoryByteStore\n",
+    "from langchain_classic.retrievers import MultiVectorRetriever\n",
+    "import pickle\n",
+    "import shutil\n",
+    "import os\n",
+    "import csv\n",
+    "import requests\n",
+    "from urllib.parse import unquote\n",
+    "from bs4 import BeautifulSoup\n",
+    "from langchain_text_splitters import RecursiveCharacterTextSplitter\n",
+    "from IPython.display import Markdown\n",
+    "import cloudscraper\n",
+    "import time\n",
+    "from langchain_ollama import OllamaLLM"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "829ade48",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from api_config import configure_google_api_key\n",
+    "\n",
+    "GOOGLE_API_KEY = configure_google_api_key()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "3eadb994",
+   "metadata": {},
+   "source": [
+    "## Scrapping"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "f0408186",
+   "metadata": {},
+   "source": [
+    "### Config sources"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 68,
+   "id": "23479038",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "WIKI_PAGES = [\n",
+    "    \"Minecraft\"\n",
+    "]\n",
+    "\n",
+    "FANDOM_URLS = [\n",
+    "    \"https://minecraft.fandom.com/fr/wiki/Survie\",\n",
+    "    \"https://minecraft.fandom.com/fr/wiki/Cr%C3%A9atif\",\n",
+    "    \"https://minecraft.fandom.com/fr/wiki/Hardcore\",\n",
+    "    \"https://minecraft.fandom.com/fr/wiki/Fabrication\",\n",
+    "    \"https://minecraft.fandom.com/fr/wiki/Cuisson\",\n",
+    "    \"https://minecraft.fandom.com/fr/wiki/Alchimie\",\n",
+    "    \"https://minecraft.fandom.com/fr/wiki/La_Foire_aux_Questions\",\n",
+    "    \"https://minecraft.fandom.com/fr/wiki/Tutoriels/Choses_%C3%A0_ne_PAS_faire\",\n",
+    "    \"https://minecraft.fandom.com/fr/wiki/Tutoriels/Survie_dans_le_Nether\",\n",
+    "    \"https://minecraft.fandom.com/fr/wiki/Tutoriels/L%27End_et_l%27Ender_Dragon\",\n",
+    "    \"https://minecraft.fandom.com/fr/wiki/Cr%C3%A9atures\"\n",
+    "]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 69,
+   "id": "fd32a9c7",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "scraper = cloudscraper.create_scraper()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 70,
+   "id": "6de5838e",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def write_csv(file_name, paragraphs):\n",
+    "    # Create parent folder automatically if it does not exist\n",
+    "    folder = os.path.dirname(file_name)\n",
+    "    if folder:\n",
+    "        os.makedirs(folder, exist_ok=True)\n",
+    "\n",
+    "    with open(file_name, \"w\", newline=\"\", encoding=\"utf-8\") as f:\n",
+    "        writer = csv.writer(f)\n",
+    "        writer.writerow([\"text\"])\n",
+    "        for p in paragraphs:\n",
+    "            writer.writerow([p])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "5e16edb4",
+   "metadata": {},
+   "source": [
+    "### Wikipedia"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 71,
+   "id": "c0b6abd1",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def scrape_wikipedia(title: str):\n",
+    "\n",
+    "    url = \"https://fr.wikipedia.org/w/api.php\"\n",
+    "\n",
+    "    params = {\n",
+    "        \"action\": \"parse\",\n",
+    "        \"page\": title,\n",
+    "        \"title\": \"wikipedia\",\n",
+    "        \"format\": \"json\",\n",
+    "        \"prop\": \"text\",\n",
+    "        \"redirects\": True\n",
+    "    }\n",
+    "\n",
+    "    r = requests.get(url, params=params, headers={\"User-Agent\": \"Mozilla/5.0\"})\n",
+    "    data = r.json()\n",
+    "\n",
+    "    html = data[\"parse\"][\"text\"][\"*\"]\n",
+    "    soup = BeautifulSoup(html, \"html.parser\")\n",
+    "\n",
+    "    texts = []\n",
+    "    capture = False\n",
+    "\n",
+    "    for tag in soup.find_all([\"h2\", \"p\"]):\n",
+    "\n",
+    "        t = tag.get_text(\" \", strip=True)\n",
+    "\n",
+    "        if tag.name == \"h2\" and \"Références\" in t:\n",
+    "            break\n",
+    "\n",
+    "        if tag.name == \"h2\":\n",
+    "            capture = True\n",
+    "            continue\n",
+    "\n",
+    "        if capture and t:\n",
+    "            texts.append(t)\n",
+    "\n",
+    "    write_csv(\"files/wikipedia.csv\", texts)\n",
+    "\n",
+    "    return Document(\n",
+    "        page_content=\"\\n\\n\".join(texts),\n",
+    "        metadata={\"source\": f\"wikipedia:{title}\"}\n",
+    "    )"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "6bc0f8d8",
+   "metadata": {},
+   "source": [
+    "### Fandom"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 72,
+   "id": "2b448918",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import requests\n",
+    "from urllib.parse import urlparse, unquote\n",
+    "from langchain_core.documents import Document\n",
+    "\n",
+    "\n",
+    "def scrape_fandom(url: str):\n",
+    "\n",
+    "    parsed = urlparse(url)\n",
+    "\n",
+    "    if \"/wiki/\" not in parsed.path:\n",
+    "        return None\n",
+    "\n",
+    "    page_name = unquote(\n",
+    "        parsed.path.split(\"/wiki/\")[-1]\n",
+    "    )\n",
+    "\n",
+    "    parts = parsed.path.split(\"/\")\n",
+    "\n",
+    "    lang = parts[1] if len(parts) > 2 else \"\"\n",
+    "\n",
+    "    api_url = (\n",
+    "        f\"{parsed.scheme}://{parsed.netloc}/{lang}/api.php\"\n",
+    "    )\n",
+    "\n",
+    "    params = {\n",
+    "        \"action\": \"query\",\n",
+    "        \"prop\": \"extracts\",\n",
+    "        \"titles\": page_name,\n",
+    "        \"format\": \"json\",\n",
+    "        \"explaintext\": True,\n",
+    "        \"redirects\": 1,\n",
+    "    }\n",
+    "\n",
+    "    response = requests.get(\n",
+    "        api_url,\n",
+    "        params=params,\n",
+    "        headers={\"User-Agent\": \"Mozilla/5.0\"},\n",
+    "        timeout=30,\n",
+    "    )\n",
+    "\n",
+    "    data = response.json()\n",
+    "\n",
+    "    pages = data.get(\"query\", {}).get(\"pages\", {})\n",
+    "\n",
+    "    if not pages:\n",
+    "        return None\n",
+    "\n",
+    "    page = next(iter(pages.values()))\n",
+    "\n",
+    "    text = page.get(\"extract\", \"\").strip()\n",
+    "\n",
+    "    if not text:\n",
+    "        return None\n",
+    "\n",
+    "    return Document(\n",
+    "        page_content=text,\n",
+    "        metadata={\n",
+    "            \"source\": url,\n",
+    "            \"title\": page.get(\"title\", page_name),\n",
+    "        },\n",
+    "    )"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "c14b866a",
+   "metadata": {},
+   "source": [
+    "### Build dataset"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 73,
+   "id": "cd663219",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "WIKI ERROR: Minecraft 'parse'\n",
+      "FANDOM OK: https://minecraft.fandom.com/fr/wiki/Survie\n",
+      "FANDOM OK: https://minecraft.fandom.com/fr/wiki/Cr%C3%A9atif\n",
+      "FANDOM OK: https://minecraft.fandom.com/fr/wiki/Hardcore\n",
+      "FANDOM OK: https://minecraft.fandom.com/fr/wiki/Fabrication\n",
+      "FANDOM OK: https://minecraft.fandom.com/fr/wiki/Cuisson\n",
+      "FANDOM OK: https://minecraft.fandom.com/fr/wiki/Alchimie\n",
+      "FANDOM OK: https://minecraft.fandom.com/fr/wiki/La_Foire_aux_Questions\n",
+      "FANDOM OK: https://minecraft.fandom.com/fr/wiki/Tutoriels/Choses_%C3%A0_ne_PAS_faire\n",
+      "FANDOM OK: https://minecraft.fandom.com/fr/wiki/Tutoriels/Survie_dans_le_Nether\n",
+      "FANDOM OK: https://minecraft.fandom.com/fr/wiki/Tutoriels/L%27End_et_l%27Ender_Dragon\n",
+      "FANDOM OK: https://minecraft.fandom.com/fr/wiki/Cr%C3%A9atures\n",
+      "\n",
+      "TOTAL DOCS: 11\n"
+     ]
+    }
+   ],
+   "source": [
+    "docs = []\n",
+    "\n",
+    "# Wikipedia\n",
+    "for page in WIKI_PAGES:\n",
+    "    try:\n",
+    "        docs.append(scrape_wikipedia(page))\n",
+    "        print(\"WIKI OK:\", page)\n",
+    "    except Exception as e:\n",
+    "        print(\"WIKI ERROR:\", page, e)\n",
+    "\n",
+    "# Fandom\n",
+    "for url in FANDOM_URLS:\n",
+    "    try:\n",
+    "        doc = scrape_fandom(url)\n",
+    "        if doc:\n",
+    "            docs.append(doc)\n",
+    "            print(\"FANDOM OK:\", url)\n",
+    "    except Exception as e:\n",
+    "        print(\"FANDOM ERROR:\", url, e)\n",
+    "\n",
+    "print(\"\\nTOTAL DOCS:\", len(docs))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "6a9c610c",
+   "metadata": {},
+   "source": [
+    "### Chunking"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 75,
+   "id": "549f3688",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "CHUNKS: 65\n"
+     ]
+    }
+   ],
+   "source": [
+    "splitter = RecursiveCharacterTextSplitter(\n",
+    "    chunk_size=2000,\n",
+    "    chunk_overlap=150\n",
+    ")\n",
+    "\n",
+    "split_docs = splitter.split_documents(docs)\n",
+    "\n",
+    "print(\"CHUNKS:\", len(split_docs))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "c1036f71",
+   "metadata": {},
+   "source": [
+    "### Enrchich"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 76,
+   "id": "4ecac5cd",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def enrich_with_source(docs):\n",
+    "    enriched = []\n",
+    "    for d in docs:\n",
+    "        src = d.metadata.get(\"source\", \"unknown\")\n",
+    "        source_type = \"WIKIPEDIA\" if \"wikipedia\" in src else \"FANDOM\"\n",
+    "\n",
+    "        # Extraire le nom de la page depuis l'URL comme \"pseudo-titre\"\n",
+    "        if \"wiki/\" in src:\n",
+    "            page_title = src.split(\"wiki/\")[-1].replace(\"_\", \" \")\n",
+    "        elif \"wikipedia:\" in src:\n",
+    "            page_title = src.split(\"wikipedia:\")[-1].replace(\"_\", \" \")\n",
+    "        else:\n",
+    "            page_title = src\n",
+    "\n",
+    "        # Enrichissement du chunk : on ajoute le contexte AVANT le texte\n",
+    "        # → la similarité vectorielle bénéficie du titre + type de source\n",
+    "        d.page_content = (\n",
+    "            f\"SOURCE: {src}\\n\"\n",
+    "            f\"SOURCE_TYPE: {source_type}\\n\"\n",
+    "            f\"TOPIC: {page_title}\\n\\n\"   # ← nouveauté\n",
+    "            f\"{d.page_content}\"\n",
+    "        )\n",
+    "        enriched.append(d)\n",
+    "    return enriched\n",
+    "\n",
+    "split_docs = enrich_with_source(split_docs)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "e585cfb3",
+   "metadata": {},
+   "source": [
+    "## Initialize embedding model + Retriever"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 77,
+   "id": "bf288fd6",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from langchain_google_genai import GoogleGenerativeAIEmbeddings\n",
+    "from langchain_ollama import OllamaEmbeddings\n",
+    "\n",
+    "gemini_embeddings = GoogleGenerativeAIEmbeddings(\n",
+    "    model=\"models/gemini-embedding-001\",\n",
+    "    task_type=\"retrieval_document\"\n",
+    ")\n",
+    "\n",
+    "embeddings = OllamaEmbeddings(\n",
+    "    model=\"mxbai-embed-large\"\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 78,
+   "id": "0bfa902f",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from langchain_google_genai import ChatGoogleGenerativeAI\n",
+    "\n",
+    "# llm = ChatGoogleGenerativeAI(model=\"gemini-3.5-flash\")\n",
+    "\n",
+    "from langchain_ollama import ChatOllama\n",
+    "\n",
+    "llm = ChatOllama(\n",
+    "    model=\"llama3.2:3b\",\n",
+    "    temperature=0\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "62d6171c",
+   "metadata": {},
+   "source": [
+    "#### Store data using chroma"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 79,
+   "id": "c18bfe46",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import shutil\n",
+    "import os\n",
+    "path = \"./chroma_minecraft_db\"\n",
+    "\n",
+    "if os.path.exists(path):\n",
+    "    try:\n",
+    "        shutil.rmtree(path)\n",
+    "    except PermissionError:\n",
+    "        print(\"dossier encore utilisé → restart kernel puis relance\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "aa4b02fd",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Survie\n",
+      "Voici un résumé de la page en 6 à 8 phrases :\n",
+      "\n",
+      "Le mode Survie est un mode de jeu de Minecraft dans lequel les joueurs doivent collecter des ressources, bâtir des structures et survivre aux créatures hostiles. La difficulté peut être ajustée en fonction du joueur, avec des options de difficulté paisible, facile, normal et difficile. Les joueurs doivent gérer leur faim, explorer le monde pour trouver des ressources et construire des structures pour survivre. Le mode Survie permet aux joueurs de coopérer ou de s'attaquer les uns aux autres en multijoueur. La difficulté régionale augmente à mesure que le joueur reste dans la même région, rendant les créatures hostiles plus dangereuses. Les joueurs peuvent également utiliser des potions et des outils pour survivre et prospérer. Le mode Survie est un défi qui nécessite de la stratégie et de la préparation pour réussir.\n",
+      "Créatif\n",
+      "Voici une résumé en 6 à 8 phrases :\n",
+      "\n",
+      "Le mode Créatif est un mode de jeu dans Minecraft qui permet aux joueurs de construire et détruire facilement des structures sans aspect de survie. Les joueurs ont accès à tous les blocs disponibles en quantité illimitée, sans points de vie, et peuvent voler pour se déplacer plus rapidement. Le mode Créatif est axé sur la construction et permet aux joueurs de créer des œuvres d'art et des structures complexes sans limitation de ressources. Les joueurs ont également de l'expérience illimitée. Le mode Créatif n'est généralement pas activé sur les serveurs, mais peut être accordé à certains joueurs pour qu'ils construisent des projets publics. Certains serveurs sont entièrement consacrés au mode Créatif, mais peuvent être vulnérables au vandalisme. Le mode Créatif est représenté par 1 dans le fichier level.dat et permet aux joueurs d'accéder à un inventaire avec des objets en quantité illimitée.\n",
+      "Hardcore\n",
+      "Voici un résumé de la page en 7 phrases :\n",
+      "\n",
+      "Le mode Hardcore est un mode de jeu dérivant du mode Survie, caractérisé par l'impossibilité de réapparaître après la mort et le verrouillage de la difficulté. Le mode est activable lors de la génération du monde et une fois que la carte est générée, la difficulté est réglée sur \"difficile\" (Hard) et il n'est plus possible de la changer. Lorsque le joueur meurt, il a la possibilité de basculer en mode spectateur ou d'effacer définitivement le monde. Le mode Hardcore est spécifique aux mondes, pas aux joueurs, et les administrateurs de serveur peuvent utiliser la commande /gamemode pour changer leur propre mode de jeu ou celui d'un autre joueur. Le mode Hardcore a été ajouté dans la version Bêta 1.9 pre-release 2 et est maintenant disponible dans la version 1.0.0. Il est possible d'utiliser les commandes en mode Hardcore en ouvrant la partie au réseau local (LAN) tout en autorisant les commandes. Le mode Ultra Hardcore peut être considéré comme la suite logique pour un joueur Hardcore, car il désactive la régénération de la vie et augmente encore la difficulté du jeu.\n",
+      "Fabrication\n",
+      "Voici un résumé de la page en 6 à 8 phrases :\n",
+      "\n",
+      "La fabrication ou artisanat est une fonction dans Minecraft qui permet aux joueurs de créer des blocs, outils et ressources à partir d'autres objets. Cette fonction est disponible depuis la version Bêta et alpha, ainsi que dans les anciens modes Indev et Infdev. Pour fabriquer quelque chose, le joueur doit déplacer les objets de son inventaire sur une grille de fabrication et placer les objets en donnant la forme de l'objet souhaité. Les joueurs ont accès à des grilles de 2×2 ou 3×3 qui peuvent être utilisées pour fabriquer des objets avec différentes tailles. Certains objets fabriqués, tels que les outils et les armures, sont soumis à une durabilité en Survie qui dépend du matériau utilisé. La fabrication est également liée aux enchantements, qui peuvent être appliqués pour augmenter la durabilité des outils.\n",
+      "Cuisson\n",
+      "Voici une résumé de la page en 6 à 8 phrases :\n",
+      "\n",
+      "La cuisson est une fonctionnalité de Minecraft qui permet de faire fondre et brûler des éléments dans un fourneau. Le processus de cuisson prend 10 secondes par stack de 64 et continue tant qu'il y a des objets à cuire, du combustible et de la place dans le champ de sortie. L'icône du feu diminue pour représenter le temps restant du combustible. Les objets peuvent être cuits en utilisant différents combustibles, tels que le charbon ou le seau de lave. Il est possible de retirer des objets à cuire pendant la cuisson, mais il est recommandé d'éviter le gaspillage pour maximiser l'efficacité du processus. La cuisson peut être interrompue si le joueur part trop loin ou utilise un lit pendant la cuisson.\n",
+      "Alchimie\n",
+      "Voici un résumé en 6 à 8 phrases de la page sur l'alchimie dans Minecraft :\n",
+      "\n",
+      "L'alchimie est une science qui permet de créer des potions et des effets spécifiques dans Minecraft. Pour commencer, il faut fabriquer un alambic et le poser sur le sol, puis faire un clic droit dessus pour afficher la grille d'alchimie. Les ingrédients de base tels que la poudre de Blaze et les ingrédients à effet sont nécessaires pour créer des potions. Les potions peuvent être converties en potions jetables avec de la poudre à canon, puis transformées en potions persistantes avec du souffle de dragon. Les effets de corruption peuvent modifier les propriétés d'une potion, tandis que les ingrédients à effet attribuent des effets spécifiques aux potions étranges. Le système d'alchimie a été simplifié et rationalisé dans certaines versions de Minecraft, mais certains effets de potion sont encore inaccessibles.\n",
+      "La Foire aux Questions\n",
+      "Voici un résumé de la page en 6 à 8 phrases :\n",
+      "\n",
+      "Minecraft est un jeu qui nécessite une certaine connaissance pour progresser. Pour commencer, il faut rassembler du bois et créer des objets essentiels comme une pioche, une épée et un établi. Il est important de se construire un abri sûr et de gérer les ressources pour survivre. Les plantes nécessitent de la lumière pour pousser et il faut prendre soin du sable et du gravier pour éviter qu'ils ne tombent. Les serveurs multijoueur peuvent contenir des personnes malveillantes, mais certains ont des plugins anti-vandalisme pour protéger les joueurs. Il est important de lire la description des serveurs et les commentaires des joueurs avant de s'inscrire.\n",
+      "Tutoriels/Choses à ne PAS faire\n",
+      "Voici un résumé des conseils pour débutants en Minecraft :\n",
+      "\n",
+      "* Ne creusez pas sous vos pieds pour éviter de tomber dans des cavernes ou des pièges.\n",
+      "* Ne détruisez pas le bloc au-dessus de votre tête pour éviter les blessures et les explosions.\n",
+      "* Ne regardez pas les Endermen sans protection, car ils peuvent vous attaquer.\n",
+      "* N'essayez pas de tuer des Creepers dès la première nuit, car ils sont difficiles à tuer et peuvent vous faire exploser.\n",
+      "* Évitez d'aventurer à l'extérieur durant votre première nuit pour éviter les créatures hostiles.\n",
+      "* Ne minez pas des blocs de valeur avec le mauvais équipement pour éviter de perdre vos objets précieux.\n",
+      "* Utilisez les bons outils pour tuer les créatures, comme une épée ou un arc.\n",
+      "* N'essayez pas de faire des cheminées dans une maison en bois pour éviter les incendies.\n",
+      "* Choisissez les bons enchantements pour vos armures et épées pour maximiser votre efficacité.\n",
+      "Tutoriels/Survie dans le Nether\n",
+      "Voici une version réorganisée et simplifiée du texte :\n",
+      "\n",
+      "**Le Nether**\n",
+      "\n",
+      "Le Nether est un monde parallèle au monde normal, accessible via des portails. Il est caractérisé par une atmosphère hostile, des températures élevées et une présence de monstres.\n",
+      "\n",
+      "**Monstres du Nether**\n",
+      "\n",
+      "* **Ghasts** : créatures volantes qui tirent des boules de feu explosives. Évitez les approcher.\n",
+      "* **Blazes** : créatures rares qui apparaissent dans les forteresses du Nether. Elles envoient des boules de feu avec une courte portée.\n",
+      "* **Piglins zombifiés** : créatures neutres qui se déplacent lentement sur le sable des âmes. Ils peuvent être tués avec un arc ou une épée enchantée.\n",
+      "\n",
+      "**Conseils pour survivre au Nether**\n",
+      "\n",
+      "* Évitez les lacs de lave et les boules de feu.\n",
+      "* Utilisez des blocs de pierres pour neutraliser les boules de feu.\n",
+      "* Boire la potion de résistance au feu pour protéger-vous contre les Blazes.\n",
+      "* Utilisez un arc ou une épée enchantée pour tuer les Ghasts et les Piglins zombifiés.\n",
+      "\n",
+      "**Portails**\n",
+      "\n",
+      "Les portails du Nether sont liés par un facteur de 8, ce qui signifie que la distance parcourue dans le Nether est 8 fois plus importante dans le monde normal. Vous pouvez créer plusieurs portails pour \"voyager\" rapidement entre les deux mondes.\n",
+      "\n",
+      "**Base en pierres**\n",
+      "\n",
+      "Construire une base en pierres est recommandé pour éviter d'être attaqué par les Ghasts et les Piglins zombifiés. Assurez-vous de l'éclairer pour éviter les attaques nocturnes.\n",
+      "\n",
+      "**Cubes de magma**\n",
+      "\n",
+      "Les cubes de magma sont des monstres qui se trouvent dans le Nether. Ils sautent haut et se déplacent vite, mais peuvent être tués avec un arc ou une épée enchantée. Ils lâchent de la crème de magma lorsqu'ils sont tués, ingrédient utile en alchimie pour fabriquer des potions.\n",
+      "Tutoriels/L'End et l'Ender Dragon\n",
+      "Voici un résumé en 6 à 8 phrases :\n",
+      "\n",
+      "L'End est une dimension où se trouve l'Ender Dragon, une créature puissante qui peut être tuée pour obtenir des récompenses. Pour y accéder, il faut d'abord récupérer des perles de l'Ender et les utiliser pour créer un portail vers la dimension. Une fois dans l'End, il faut détruire les cristaux de l'End pour empêcher le dragon de se régénérer. Pour cela, on utilise une arme avec des boules de neige qui causent des dégâts importants à l'Ender Dragon. Après avoir tué le dragon, le portail de sortie s'ouvre et il est possible de récupérer l'œuf du dragon ou de regagner la surface pour trouver une ville de l'End.\n",
+      "Créatures\n",
+      "Voici un résumé de la page en 6 à 8 phrases :\n",
+      "\n",
+      "Les créatures ou mobs sont des entités qui se déplacent par elles-mêmes et ont des modèles de comportement déterminés. Elles peuvent apparaître naturellement, être invoquées avec une commande ou être générées à l'aide d'un œuf ou d'une étiquette. Les créatures sont classées en plusieurs catégories, telles que les morts-vivantes, aquatiques, arthropodes et illageois, chacune ayant ses propres caractéristiques et faiblesses. Les joueurs peuvent combattre les créatures passives facilement, tandis que les créatures hostiles se répartissent en trois groupes principaux : les créatures de l'obscurité, les créatures du Nether et les créatures locales. Les joueurs peuvent approcher les créatures hostiles sans être détectés tant qu'il y a des blocs solides entre eux. Il existe également des commandes spéciales qui permettent aux joueurs de renommer ou d'invoquer des créatures avec des étiquettes ou des œufs.\n"
+     ]
+    }
+   ],
+   "source": [
+    "# --- ÉTAPE 1 : Générer un résumé par chunk ---\n",
+    "# On demande au LLM de résumer chaque chunk en 3 phrases.\n",
+    "# C'est CE résumé qui sera embedé et stocké dans Chroma.\n",
+    "# Pourquoi ? Parce que \"C'est quoi le Warden ?\" matche mieux\n",
+    "# sur \"Le Warden est un mob hostile des profondeurs...\" \n",
+    "# que sur un chunk brut plein de balises et de bruit.\n",
+    "\n",
+    "summarize_chain = (\n",
+    "    PromptTemplate.from_template(\n",
+    "            \"\"\"\n",
+    "            Résume cette page en 6 à 8 phrases :\n",
+    "\n",
+    "            {doc}\n",
+    "            \"\"\"\n",
+    "    )\n",
+    "    | llm\n",
+    "    | StrOutputParser()\n",
+    ")\n",
+    "\n",
+    "# On génère tous les résumés (attention au rate limit Gemini)\n",
+    "summaries = []\n",
+    "for doc in docs:\n",
+    "    print(doc.metadata.get(\"title\"))\n",
+    "    # print(len(doc.page_content.split()))\n",
+    "    # print(\"doc\")\n",
+    "    summary = summarize_chain.invoke({\"doc\": doc.page_content})\n",
+    "    summaries.append(summary)\n",
+    "    print(summary)\n",
+    "\n",
+    "\"\"\"\n",
+    "Survie\n",
+    "Voici un résumé de la page en 6 à 8 phrases :\n",
+    "\n",
+    "Le mode Survie est un mode de jeu de Minecraft dans lequel les joueurs doivent collecter des ressources, bâtir des structures et survivre aux créatures hostiles. La difficulté peut être ajustée en fonction du joueur, avec des options de difficulté paisible, facile, normal et difficile. Les joueurs doivent gérer leur faim, explorer le monde pour trouver des ressources et construire des structures pour survivre. Le mode Survie permet aux joueurs de coopérer ou de s'attaquer les uns aux autres en multijoueur. La difficulté régionale augmente à mesure que le joueur reste dans la même région, rendant les créatures hostiles plus dangereuses. Les joueurs peuvent également utiliser des potions et des outils pour survivre et prospérer. Le mode Survie est un défi qui nécessite de la stratégie et de la préparation pour réussir.\n",
+    "Créatif\n",
+    "Voici une résumé en 6 à 8 phrases :\n",
+    "\n",
+    "Le mode Créatif est un mode de jeu dans Minecraft qui permet aux joueurs de construire et détruire facilement des structures sans aspect de survie. Les joueurs ont accès à tous les blocs disponibles en quantité illimitée, sans points de vie, et peuvent voler pour se déplacer plus rapidement. Le mode Créatif est axé sur la construction et permet aux joueurs de créer des œuvres d'art et des structures complexes sans limitation de ressources. Les joueurs ont également de l'expérience illimitée. Le mode Créatif n'est généralement pas activé sur les serveurs, mais peut être accordé à certains joueurs pour qu'ils construisent des projets publics. Certains serveurs sont entièrement consacrés au mode Créatif, mais peuvent être vulnérables au vandalisme. Le mode Créatif est représenté par 1 dans le fichier level.dat et permet aux joueurs d'accéder à un inventaire avec des objets en quantité illimitée.\n",
+    "Hardcore\n",
+    "Voici un résumé de la page en 7 phrases :\n",
+    "\n",
+    "Le mode Hardcore est un mode de jeu dérivant du mode Survie, caractérisé par l'impossibilité de réapparaître après la mort et le verrouillage de la difficulté. Le mode est activable lors de la génération du monde et une fois que la carte est générée, la difficulté est réglée sur \"difficile\" (Hard) et il n'est plus possible de la changer. Lorsque le joueur meurt, il a la possibilité de basculer en mode spectateur ou d'effacer définitivement le monde. Le mode Hardcore est spécifique aux mondes, pas aux joueurs, et les administrateurs de serveur peuvent utiliser la commande /gamemode pour changer leur propre mode de jeu ou celui d'un autre joueur. Le mode Hardcore a été ajouté dans la version Bêta 1.9 pre-release 2 et est maintenant disponible dans la version 1.0.0. Il est possible d'utiliser les commandes en mode Hardcore en ouvrant la partie au réseau local (LAN) tout en autorisant les commandes. Le mode Ultra Hardcore peut être considéré comme la suite logique pour un joueur Hardcore, car il désactive la régénération de la vie et augmente encore la difficulté du jeu.\n",
+    "Fabrication\n",
+    "Voici un résumé de la page en 6 à 8 phrases :\n",
+    "\n",
+    "La fabrication ou artisanat est une fonction dans Minecraft qui permet aux joueurs de créer des blocs, outils et ressources à partir d'autres objets. Cette fonction est disponible depuis la version Bêta et alpha, ainsi que dans les anciens modes Indev et Infdev. Pour fabriquer quelque chose, le joueur doit déplacer les objets de son inventaire sur une grille de fabrication et placer les objets en donnant la forme de l'objet souhaité. Les joueurs ont accès à des grilles de 2×2 ou 3×3 qui peuvent être utilisées pour fabriquer des objets avec différentes tailles. Certains objets fabriqués, tels que les outils et les armures, sont soumis à une durabilité en Survie qui dépend du matériau utilisé. La fabrication est également liée aux enchantements, qui peuvent être appliqués pour augmenter la durabilité des outils.\n",
+    "Cuisson\n",
+    "Voici une résumé de la page en 6 à 8 phrases :\n",
+    "\n",
+    "La cuisson est une fonctionnalité de Minecraft qui permet de faire fondre et brûler des éléments dans un fourneau. Le processus de cuisson prend 10 secondes par stack de 64 et continue tant qu'il y a des objets à cuire, du combustible et de la place dans le champ de sortie. L'icône du feu diminue pour représenter le temps restant du combustible. Les objets peuvent être cuits en utilisant différents combustibles, tels que le charbon ou le seau de lave. Il est possible de retirer des objets à cuire pendant la cuisson, mais il est recommandé d'éviter le gaspillage pour maximiser l'efficacité du processus. La cuisson peut être interrompue si le joueur part trop loin ou utilise un lit pendant la cuisson.\n",
+    "Alchimie\n",
+    "Voici un résumé en 6 à 8 phrases de la page sur l'alchimie dans Minecraft :\n",
+    "\n",
+    "L'alchimie est une science qui permet de créer des potions et des effets spécifiques dans Minecraft. Pour commencer, il faut fabriquer un alambic et le poser sur le sol, puis faire un clic droit dessus pour afficher la grille d'alchimie. Les ingrédients de base tels que la poudre de Blaze et les ingrédients à effet sont nécessaires pour créer des potions. Les potions peuvent être converties en potions jetables avec de la poudre à canon, puis transformées en potions persistantes avec du souffle de dragon. Les effets de corruption peuvent modifier les propriétés d'une potion, tandis que les ingrédients à effet attribuent des effets spécifiques aux potions étranges. Le système d'alchimie a été simplifié et rationalisé dans certaines versions de Minecraft, mais certains effets de potion sont encore inaccessibles.\n",
+    "La Foire aux Questions\n",
+    "...\n",
+    "Créatures\n",
+    "Voici un résumé de la page en 6 à 8 phrases :\n",
+    "\n",
+    "Les créatures ou mobs sont des entités qui se déplacent par elles-mêmes et ont des modèles de comportement déterminés. Elles peuvent apparaître naturellement, être invoquées avec une commande ou être générées à l'aide d'un œuf ou d'une étiquette. Les créatures sont classées en plusieurs catégories, telles que les morts-vivantes, aquatiques, arthropodes et illageois, chacune ayant ses propres caractéristiques et faiblesses. Les joueurs peuvent combattre les créatures passives facilement, tandis que les créatures hostiles se répartissent en trois groupes principaux : les créatures de l'obscurité, les créatures du Nether et les créatures locales. Les joueurs peuvent approcher les créatures hostiles sans être détectés tant qu'il y a des blocs solides entre eux. Il existe également des commandes spéciales qui permettent aux joueurs de renommer ou d'invoquer des créatures avec des étiquettes ou des œufs.\n",
+    "Output is truncated. View as a scrollable element or open in a text editor. Adjust cell output settings...\n",
+    "\"\"\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "e72b198d",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# --- ÉTAPE 2 : Associer chaque résumé à son chunk original ---\n",
+    "# On crée un ID unique par chunk pour faire le lien\n",
+    "# résumé (dans Chroma) <-> chunk original (dans le docstore)\n",
+    "import uuid\n",
+    "doc_ids = [str(uuid.uuid4()) for _ in split_docs]\n",
+    "\n",
+    "# Les résumés sont les documents indexés dans Chroma\n",
+    "# On colle l'ID dans les metadata pour retrouver l'original\n",
+    "summary_docs = [\n",
+    "    Document(\n",
+    "        page_content=summaries[i],\n",
+    "        metadata={\"doc_id\": doc_ids[i]}  # clé de liaison\n",
+    "    )\n",
+    "    for i in range(len(split_docs))\n",
+    "]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "bec61187",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# --- ÉTAPE 3 : Construire le retriever ---\n",
+    "# InMemoryByteStore = le \"tiroir\" qui stocke les chunks originaux\n",
+    "# Le MultiVectorRetriever fait le pont :\n",
+    "#   1. cherche dans Chroma (résumés)\n",
+    "#   2. récupère l'ID du résumé trouvé\n",
+    "#   3. va chercher le chunk original dans le docstore\n",
+    "#   4. retourne le chunk original au LLM\n",
+    "\n",
+    "\n",
+    "vectorstore = Chroma(\n",
+    "    persist_directory=\"./chroma_minecraft_multivec\",\n",
+    "    embedding_function=gemini_embeddings\n",
+    ")\n",
+    "vectorstore.add_documents(summary_docs)\n",
+    "\n",
+    "store = InMemoryByteStore()  # stockage des chunks originaux en mémoire\n",
+    "\n",
+    "retriever = MultiVectorRetriever(\n",
+    "    vectorstore=vectorstore,   # Chroma contient les résumés\n",
+    "    byte_store=store,          # le store contient les chunks bruts\n",
+    "    id_key=\"doc_id\",           # la clé qui fait le lien\n",
+    ")\n",
+    "\n",
+    "# On peuple le docstore avec les chunks originaux\n",
+    "retriever.docstore.mset(list(zip(doc_ids, split_docs)))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "1307b4f5",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Check the number of chunks generated after text splitting.\n",
+    "print(\"split_docs:\", len(split_docs))\n",
+    "\n",
+    "# Check the number of documents actually stored in the Chroma vector database.\n",
+    "# If this number is equal to len(split_docs), the database was built without missing or duplicated chunks.\n",
+    "print(\"chroma:\", vectorstore._collection.count())"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "9b32648c",
+   "metadata": {},
+   "source": [
+    "#### Create a retriever using Chroma"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "bdcbf37f",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print(retriever.invoke(\"Minecraft\")[0].page_content[:500])\n",
+    "\n",
+    "def retrieve_documents(retriever, query):\n",
+    "    if hasattr(retriever, \"invoke\"):\n",
+    "        return retriever.invoke(query)\n",
+    "    if hasattr(retriever, \"get_relevant_documents\"):\n",
+    "        return retriever.get_relevant_documents(query)\n",
+    "    raise AttributeError(\"Le retriever ne supporte ni invoke ni get_relevant_documents.\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "0707f74f",
+   "metadata": {},
+   "source": [
+    "## Generator"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "2527b2fd",
+   "metadata": {},
+   "source": [
+    "#### Create prompt templates"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "bd0488a0",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Prompt template （more strict） to query Gemini\n",
+    "llm_prompt_template = \"\"\"Tu es un assistant expert sur le jeu Minecraft.\n",
+    "Réponds à la question en utilisant UNIQUEMENT le contexte fourni ci-dessous.\n",
+    "Si la réponse ne se trouve pas dans le contexte ou si tu n'es pas sûr, n'invente rien. Dis EXACTEMENT : \"Je suis désolé, mais l'information n'est pas dans les documents fournis.\"\n",
+    "Sois concis (5 phrases maximum) et cite la ou les sources [SOURCE_TYPE: source] à la fin de ta réponse si tu as trouvé l'information.\n",
+    "\n",
+    "Question: {question}\n",
+    "Contexte: {context}\n",
+    "Réponse:\"\"\"\n",
+    "\n",
+    "llm_prompt = PromptTemplate.from_template(llm_prompt_template)\n",
+    "\n",
+    "print(llm_prompt)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "2d966293",
+   "metadata": {},
+   "source": [
+    "#### Create a stuff documents chain"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "b5e65f85",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Combine data from documents to readable string format.\n",
+    "def format_docs(docs):\n",
+    "    formatted_docs = []\n",
+    "\n",
+    "    for doc in docs:\n",
+    "        source = doc.metadata.get(\"source\", \"unknown\")\n",
+    "        content = doc.page_content\n",
+    "\n",
+    "        formatted_text = f\"[{source}]\\n{content}\"\n",
+    "\n",
+    "        formatted_docs.append(formatted_text)\n",
+    "\n",
+    "    return \"\\n\\n\".join(formatted_docs)\n",
+    "\n",
+    "\n",
+    "rag_chain = (\n",
+    "    {\"context\": retriever | format_docs, \"question\": RunnablePassthrough()}\n",
+    "    | llm_prompt\n",
+    "    | llm\n",
+    "    | StrOutputParser()\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "0aaf2571",
+   "metadata": {},
+   "source": [
+    "### RAG AVANCÉ : ACTIVE RETRIEVAL (RRR)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "82539e61",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def check_if_answered(reponse):\n",
+    "    prompt = f\"La réponse suivante indique-t-elle qu'elle ne trouve pas l'information ou qu'elle ne sait pas ? Réponds OUI ou NON.\\nRéponse : {reponse}\"\n",
+    "    result = llm.invoke(prompt)\n",
+    "    text_content = str(result.content)\n",
+    "    return \"OUI\" in text_content.strip().upper()\n",
+    "\n",
+    "def ask_with_active_retrieval(question):\n",
+    "    print(f\"▶ Question posée : {question}\")\n",
+    "    \n",
+    "    reponse = rag_chain.invoke(question)\n",
+    "    phrase_echec = \"Je suis désolé, mais l'information n'est pas dans les documents fournis.\" # Phrase exite dans llm_prompt_template，à détecter pour déclencher l'auto-correction\n",
+    "    \n",
+    "    # Auto-correction\n",
+    "    if check_if_answered(reponse):\n",
+    "        print(\"Information introuvable. Activation de l'Active Retrieval...\")\n",
+    "        \n",
+    "        # 1. IA de réécriture (Query Optimizer)\n",
+    "        llm_rewrite = ChatGoogleGenerativeAI(model=\"gemini-3.5-flash\")\n",
+    "        rewrite_prompt = f\"\"\"Tu es un expert Minecraft. Un utilisateur a posé cette question : '{question}'. \n",
+    "        Cette question n'a donné aucun résultat exact dans notre base de données RAG. \n",
+    "        Réécris cette question sous forme de 2 ou 3 mots-clés très simples et percutants pour optimiser une recherche par similarité vectorielle. \n",
+    "        Ne renvoie QUE les mots-clés (par exemple : 'Ender Dragon stratégie'), rien d'autre.\"\"\"\n",
+    "        \n",
+    "        # Générer la nouvelle requête\n",
+    "        nouvelle_requete = str(llm_rewrite.invoke(rewrite_prompt).content)\n",
+    "        print(f\"Nouvelle requête optimisée par l'IA : {nouvelle_requete}\")\n",
+    "        \n",
+    "        # 2. Relancer la recherche avec les nouveaux mots-clés\n",
+    "        reponse_niveau_2 = rag_chain.invoke(nouvelle_requete)\n",
+    "        \n",
+    "        # 3. Vérifier si la deuxième tentative a réussi\n",
+    "        if phrase_echec not in reponse_niveau_2:\n",
+    "            print(\"Succès du Niveau 2.\")\n",
+    "            return f\"*(Auto-correction RRR : Recherche élargie avec les mots-clés '{nouvelle_requete}')*\\n\\n{reponse_niveau_2}\"\n",
+    "        else:\n",
+    "            print(\"Échec du Niveau 2. L'information n'existe définitivement pas dans la base.\")\n",
+    "            return reponse # Renvoie le message de refus standard\n",
+    "            \n",
+    "    # Si le niveau 1 a marché directement\n",
+    "    print(\"Succès du Niveau 1.\")\n",
+    "    return reponse"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "48d60256",
+   "metadata": {},
+   "source": [
+    "### Prompt the model"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "27a94d5e",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "Markdown(ask_with_active_retrieval(\"Quel est l'ingrédient de base indispensable pour l'alchimie ?\"))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "35e013f9",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "Markdown(ask_with_active_retrieval(\"C'est quoi le Warden dans Minecraft ?\"))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "a6e4d79f",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "Markdown(ask_with_active_retrieval(\"Comment survivre dans le Nether dans Minecraft ?\"))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "6af6d080",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "Markdown(ask_with_active_retrieval(\"C'est quoi l'alchimie dans Minecraft?\"))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "9a2aafa6",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "Markdown(ask_with_active_retrieval(\"Il y a combien de dimensions dans Minecraft? Décris les.\"))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "fb2d26a8",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "Markdown(ask_with_active_retrieval(\"Parle moi des boss dans Minecraft, et décris les tous.\"))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "57c69e5c",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "### ÉVALUATION DU RAG (LLM-as-a-Judge)"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "LO17_venv (3.13.3)",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.13.3"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
