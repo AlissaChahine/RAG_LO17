@@ -119,7 +119,7 @@ if __name__ == "__main__":
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
     else:
         from langchain_ollama import ChatOllama
-        llm = ChatOllama(model="qwen3:8b", temperature=0)
+        llm = ChatOllama(model="qwen3:8b", temperature=0, think=False)
 
     question = "Quel est l'ingrédient de base indispensable pour l'alchimie ?"
     print(f"Question : {question}\n")
