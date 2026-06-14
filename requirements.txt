@@ -1,0 +1,17 @@
+# Python >= 3.10 required, recommended Python 3.11
+
+streamlit
+
+langgraph
+
+langchain
+langchain-core
+langchain-community
+langchain-classic
+
+langchain-google-genai
+langchain-ollama
+
+chromadb
+
+python-dotenv
