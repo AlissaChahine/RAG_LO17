@@ -144,7 +144,6 @@ def format_docs(docs: List[Document]) -> str:
 def format_sources(docs: List[Document]) -> str:
     """
     Build a clean source list from retrieved document metadata.
-    This avoids asking the LLM to invent or cite [Document 1].
     """
 
     sources = []
@@ -162,6 +161,9 @@ def format_sources(docs: List[Document]) -> str:
         if source_text not in seen:
             seen.add(source_text)
             sources.append(source_text)
+            
+        if len(sources) >= 3:
+            break
 
     if not sources:
         return ""
@@ -712,10 +714,6 @@ def generate(state: GraphState) -> GraphState:
     generation = re.sub(r"\n?\s*Source\s*:\s*\[Document\s*\d+\]\s*$", "", generation).strip()
     generation = re.sub(r"\n?\s*Sources\s*:\s*\[Document\s*\d+\]\s*$", "", generation).strip()
 
-    # Add real sources from document metadata.
-    if "l'information n'est pas dans les documents fournis" not in generation.lower():
-        generation = generation + format_sources(documents)
-
     return {
         **state,
         "question": question,
@@ -950,17 +948,23 @@ def answer_question(question: str, show_steps: bool = True) -> GraphState:
 
 def ask_with_self_rag(question: str, show_steps: bool = True) -> str:
     """
-    Function called by the Streamlit chatbot.
+    Run the Self-RAG workflow and return only the final answer for Streamlit.
 
-    Streamlit receives only the final answer as a string.
-    The terminal receives the full workflow trace when show_steps=True.
+    The workflow steps are printed in the terminal when show_steps=True.
+    Sources are added only after the workflow is finished, so they do not affect
+    hallucination grading or answer quality grading.
     """
 
     final_state = answer_question(question, show_steps=show_steps)
+
     answer = final_state.get("generation")
+    documents = final_state.get("documents", [])
 
     if not answer:
         return "Je suis désolé, mais je n'ai pas pu générer de réponse."
+
+    if "l'information n'est pas dans les documents fournis" not in answer.lower():
+        answer = answer + format_sources(documents)
 
     return answer
 
