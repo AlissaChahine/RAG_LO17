@@ -22,14 +22,10 @@ __pycache__/
 chroma_db/
 chroma_minecraft_db_v2/
 chroma_minecraft_db/
-chroma_minecraft_multivec/
+
 
 # Exports générés par le notebook
 wikipedia.csv
 
 # Configuration VS Code 
 .vscode/
-
-#files créées
-files/
-local_chunks_store/
