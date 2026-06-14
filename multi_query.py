@@ -110,7 +110,7 @@ if __name__ == "__main__":
 
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/gemini-embedding-2",
-        task_type="retrieval_document",
+        task_type="retrieval_query",
     )
 
     provider = os.getenv("LLM_PROVIDER", "ollama")
