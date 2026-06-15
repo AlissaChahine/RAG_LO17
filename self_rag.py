@@ -32,18 +32,19 @@ from langchain_ollama import ChatOllama
 
 from api_config import configure_google_api_key
 
-
 # =============================================================================
 # Configuration
 # =============================================================================
 
 configure_google_api_key()
 
-CHROMA_DIR = os.getenv("CHROMA_DIR", "chroma_minecraft_multivec")
+CHROMA_DIR = os.getenv("CHROMA_DIR", "db/chroma_minecraft_multivec")
 STORE_DIR = os.getenv("STORE_DIR", "db/local_chunks_store")
 CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "minecraft_summaries")
 
-GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "models/gemini-embedding-001")
+GEMINI_EMBEDDING_MODEL = os.getenv(
+    "GEMINI_EMBEDDING_MODEL", "models/gemini-embedding-001"
+)
 GEMINI_LLM_MODEL = os.getenv("GEMINI_LLM_MODEL", "gemini-2.5-flash-lite")
 
 # Use your installed Ollama model.
@@ -61,6 +62,7 @@ REFUSAL_ANSWER = (
 # =============================================================================
 # Retriever
 # =============================================================================
+
 
 def retrieve_documents(retriever, query: str) -> List[Document]:
     """
@@ -144,7 +146,7 @@ def split_persona_and_user_question(raw_question: str) -> tuple[str, str]:
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
         if match:
-            persona_prompt = text[:match.start()].strip()
+            persona_prompt = text[: match.start()].strip()
             user_question = match.group(1).strip()
             return persona_prompt, user_question
 
@@ -196,7 +198,7 @@ def format_sources(docs: List[Document]) -> str:
         if source_text not in seen:
             seen.add(source_text)
             sources.append(source_text)
-            
+
         if len(sources) >= 3:
             break
 
@@ -206,6 +208,7 @@ def format_sources(docs: List[Document]) -> str:
     source_lines = "\n".join(f"- {source}" for source in sources)
 
     return f"\n\nSources :\n{source_lines}"
+
 
 # =============================================================================
 # Generation chain
@@ -242,11 +245,7 @@ Réponse :
 
 llm_prompt = PromptTemplate.from_template(llm_prompt_template)
 
-generation_chain = (
-    llm_prompt
-    | llm.with_fallbacks([ollama_llm])
-    | StrOutputParser()
-)
+generation_chain = llm_prompt | llm.with_fallbacks([ollama_llm]) | StrOutputParser()
 
 
 # =============================================================================
@@ -274,15 +273,9 @@ Document récupéré:
 Réponse:
 """
 
-retrieval_grader_prompt = PromptTemplate.from_template(
-    retrieval_grader_prompt_template
-)
+retrieval_grader_prompt = PromptTemplate.from_template(retrieval_grader_prompt_template)
 
-retrieval_grader = (
-    retrieval_grader_prompt
-    | ollama_llm
-    | StrOutputParser()
-)
+retrieval_grader = retrieval_grader_prompt | ollama_llm | StrOutputParser()
 
 
 def grade_one_document(question: str, document: Document) -> bool:
@@ -290,10 +283,12 @@ def grade_one_document(question: str, document: Document) -> bool:
     Return True if the document is relevant to the question.
     """
 
-    result = retrieval_grader.invoke({
-        "question": question,
-        "document": document.page_content[:3000],
-    })
+    result = retrieval_grader.invoke(
+        {
+            "question": question,
+            "document": document.page_content[:3000],
+        }
+    )
 
     result = result.strip().upper()
 
@@ -325,11 +320,7 @@ hallucination_grader_prompt = PromptTemplate.from_template(
     hallucination_grader_prompt_template
 )
 
-hallucination_grader = (
-    hallucination_grader_prompt
-    | ollama_llm
-    | StrOutputParser()
-)
+hallucination_grader = hallucination_grader_prompt | ollama_llm | StrOutputParser()
 
 
 def grade_hallucination(documents: List[Document], generation: str) -> bool:
@@ -339,10 +330,12 @@ def grade_hallucination(documents: List[Document], generation: str) -> bool:
 
     docs_text = format_docs(documents)
 
-    result = hallucination_grader.invoke({
-        "documents": docs_text[:8000],
-        "generation": generation,
-    })
+    result = hallucination_grader.invoke(
+        {
+            "documents": docs_text[:8000],
+            "generation": generation,
+        }
+    )
 
     result = result.strip().upper()
 
@@ -377,11 +370,7 @@ Réponds uniquement par "yes" ou "no".
 
 answer_grader_prompt = PromptTemplate.from_template(answer_grader_prompt_template)
 
-answer_grader = (
-    answer_grader_prompt
-    | ollama_llm
-    | StrOutputParser()
-)
+answer_grader = answer_grader_prompt | ollama_llm | StrOutputParser()
 
 
 def grade_answer(question: str, generation: str) -> bool:
@@ -389,10 +378,12 @@ def grade_answer(question: str, generation: str) -> bool:
     Return True if the generated answer actually answers the user question.
     """
 
-    result = answer_grader.invoke({
-        "question": question,
-        "generation": generation,
-    })
+    result = answer_grader.invoke(
+        {
+            "question": question,
+            "generation": generation,
+        }
+    )
 
     result = result.strip().upper()
 
@@ -428,9 +419,7 @@ Requêtes :
 multi_query_prompt = PromptTemplate.from_template(multi_query_prompt_template)
 
 multi_query_chain = (
-    multi_query_prompt
-    | llm.with_fallbacks([ollama_llm])
-    | StrOutputParser()
+    multi_query_prompt | llm.with_fallbacks([ollama_llm]) | StrOutputParser()
 )
 
 
@@ -538,11 +527,7 @@ Document hypothétique dense:
 
 hyde_dense_prompt = PromptTemplate.from_template(hyde_dense_template)
 
-hyde_chain = (
-    hyde_dense_prompt
-    | llm.with_fallbacks([ollama_llm])
-    | StrOutputParser()
-)
+hyde_chain = hyde_dense_prompt | llm.with_fallbacks([ollama_llm]) | StrOutputParser()
 
 
 def generate_hyde_query(question: str) -> str:
@@ -561,6 +546,7 @@ def generate_hyde_query(question: str) -> str:
 # Graph state
 # =============================================================================
 
+
 class GraphState(TypedDict):
     """
     State of the Self-RAG graph.
@@ -574,7 +560,7 @@ class GraphState(TypedDict):
     raw_question: str
     user_question: str
     persona_prompt: str
-    
+
     question: str
     retrieval_query: str
     documents: List[Document]
@@ -582,7 +568,7 @@ class GraphState(TypedDict):
 
     generation_is_grounded: Optional[bool]
     generation_answers_question: Optional[bool]
-    
+
     query_strategy: str
     multi_queries: Optional[List[str]]
     hyde_query: Optional[str]
@@ -615,6 +601,7 @@ def get_next_query_translation_route(state: GraphState) -> Optional[str]:
 # =============================================================================
 # LangGraph nodes
 # =============================================================================
+
 
 def retrieve(state: GraphState) -> GraphState:
     """
@@ -769,15 +756,21 @@ def generate(state: GraphState) -> GraphState:
 
     context = format_docs(documents)
 
-    generation = generation_chain.invoke({
-        "persona_prompt": state.get("persona_prompt", ""),
-        "question": question,
-        "context": context,
-    })
+    generation = generation_chain.invoke(
+        {
+            "persona_prompt": state.get("persona_prompt", ""),
+            "question": question,
+            "context": context,
+        }
+    )
 
     # Remove possible fake citations generated by the LLM.
-    generation = re.sub(r"\n?\s*Source\s*:\s*\[Document\s*\d+\]\s*$", "", generation).strip()
-    generation = re.sub(r"\n?\s*Sources\s*:\s*\[Document\s*\d+\]\s*$", "", generation).strip()
+    generation = re.sub(
+        r"\n?\s*Source\s*:\s*\[Document\s*\d+\]\s*$", "", generation
+    ).strip()
+    generation = re.sub(
+        r"\n?\s*Sources\s*:\s*\[Document\s*\d+\]\s*$", "", generation
+    ).strip()
 
     print("\n--- GENERATED ANSWER ---", flush=True)
     print(f"Strategy: {query_strategy}", flush=True)
@@ -808,9 +801,11 @@ def refuse_answer(state: GraphState) -> GraphState:
         "generation_answers_question": False,
     }
 
+
 # =============================================================================
 # Conditional edges
 # =============================================================================
+
 
 def decide_after_document_grading(state: GraphState) -> str:
     """
@@ -965,6 +960,7 @@ app = workflow.compile()
 # Public API for the chatbot
 # =============================================================================
 
+
 def build_initial_state(raw_question: str):
     """
     Build the initial state for the Self-RAG workflow.
@@ -980,22 +976,17 @@ def build_initial_state(raw_question: str):
         "raw_question": raw_question,
         "user_question": user_question,
         "persona_prompt": persona_prompt,
-
         # Keep this key for compatibility with the existing workflow.
         # From now on, state["question"] is the clean user question.
         "question": user_question,
         "retrieval_query": user_question,
-
         "documents": [],
         "generation": None,
-        
         "generation_is_grounded": None,
         "generation_answers_question": None,
-
         "query_strategy": "standard",
         "multi_queries": None,
         "hyde_query": None,
-
         "rewrite_count": 0,
         "max_rewrites": 2,
     }
@@ -1071,7 +1062,10 @@ def ask_with_self_rag(question: str, show_steps: bool = True) -> str:
     if not answer:
         return "Je suis désolé, mais je n'ai pas pu générer de réponse."
 
-    if answer != REFUSAL_ANSWER and "l'information n'est pas dans les documents fournis" not in answer.lower():
+    if (
+        answer != REFUSAL_ANSWER
+        and "l'information n'est pas dans les documents fournis" not in answer.lower()
+    ):
         answer = answer + format_sources(documents)
 
     return answer
