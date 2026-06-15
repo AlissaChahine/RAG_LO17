@@ -12,7 +12,7 @@ Goal:
 
 import os
 import re
-from typing import List, Optional
+from typing import List, Optional, TypedDict
 
 from typing_extensions import TypedDict
 
@@ -39,7 +39,7 @@ from api_config import configure_google_api_key
 
 configure_google_api_key()
 
-CHROMA_DIR = os.getenv("CHROMA_DIR", "db/chroma_minecraft_multivec")
+CHROMA_DIR = os.getenv("CHROMA_DIR", "chroma_minecraft_multivec")
 STORE_DIR = os.getenv("STORE_DIR", "db/local_chunks_store")
 CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "minecraft_summaries")
 
@@ -51,6 +51,12 @@ GEMINI_LLM_MODEL = os.getenv("GEMINI_LLM_MODEL", "gemini-2.5-flash-lite")
 # export OLLAMA_MODEL="qwen3:8b"
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 
+# =============================================================================
+
+REFUSAL_ANSWER = (
+    "Je suis désolé, mais l'information n'est pas suffisamment confirmée "
+    "par les documents fournis."
+)
 
 # =============================================================================
 # Retriever
@@ -116,6 +122,35 @@ ollama_llm = ChatOllama(
 # =============================================================================
 # Helpers
 # =============================================================================
+def split_persona_and_user_question(raw_question: str) -> tuple[str, str]:
+    """
+    Split the frontend input into:
+    - persona_prompt: style/persona instructions
+    - user_question: the real question used for retrieval
+
+    Expected frontend format:
+    <persona prompt>
+
+    Question de l'utilisateur : <real user question>
+    """
+
+    text = raw_question.strip()
+
+    patterns = [
+        r"Question\s+de\s+l['’]utilisateur\s*:\s*(.+)\s*$",
+        r"Question\s*:\s*(.+)\s*$",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            persona_prompt = text[:match.start()].strip()
+            user_question = match.group(1).strip()
+            return persona_prompt, user_question
+
+    # Fallback: if no marker is found, treat the whole input as a normal question.
+    return "", text
+
 
 def format_docs(docs: List[Document]) -> str:
     """
@@ -179,20 +214,30 @@ def format_sources(docs: List[Document]) -> str:
 llm_prompt_template = """Tu es un assistant expert sur le jeu Minecraft.
 
 Réponds à la question en utilisant UNIQUEMENT le contexte fourni ci-dessous.
-
+Réponds uniquement avec les informations directement utiles pour répondre à la question.
+N'ajoute pas d'exemples, d'ingrédients, de recettes, de blocs ou de mécaniques qui ne sont pas explicitement présents dans le contexte.
+Si le contexte ne permet pas de répondre précisément, dis que l'information n'est pas suffisamment confirmée.
 Si la réponse ne se trouve pas dans le contexte ou si tu n'es pas sûr, n'invente rien.
 Dans ce cas, dis EXACTEMENT :
 "Je suis désolé, mais l'information n'est pas dans les documents fournis."
 
-Sois concis et clair. Ne cite pas les sources toi-même : elles seront ajoutées automatiquement après ta réponse.
+Consignes de style/persona :
+{persona_prompt}
 
-Question:
+Important :
+- Les consignes de style servent uniquement à formuler la réponse.
+- Elles ne doivent pas être utilisées comme source d'information.
+- Ne cite pas les sources toi-même : elles seront ajoutées automatiquement après ta réponse.
+- La persona doit influencer seulement le ton, pas le contenu factuel.
+- Réponds toujours en français, même si certaines consignes ou certains termes sont en anglais.
+
+Question de l'utilisateur :
 {question}
 
-Contexte:
+Contexte :
 {context}
 
-Réponse:
+Réponse :
 """
 
 llm_prompt = PromptTemplate.from_template(llm_prompt_template)
@@ -261,7 +306,10 @@ Ton rôle est de vérifier si la réponse générée est bien soutenue par les d
 
 Réponds YES si la réponse est globalement fondée sur les documents.
 Réponds NO si la réponse contient des informations inventées ou non soutenues par les documents.
-
+Vérifie chaque affirmation factuelle.
+Si la réponse mentionne un ingrédient, un objet, une recette ou une mécanique qui n'apparaît pas dans les documents, réponds "no".
+Même si une partie de la réponse est correcte, réponds "no" si elle contient une information non supportée.
+Si la réponse tire une conclusion qui n’est pas directement soutenue par les documents, réponds "no", même si certaines parties de la réponse sont correctes.
 Tu dois répondre uniquement par YES ou NO.
 
 Documents:
@@ -301,22 +349,30 @@ def grade_hallucination(documents: List[Document], generation: str) -> bool:
     return result.startswith("YES")
 
 
-answer_grader_prompt_template = """Tu es un évaluateur pour un système RAG.
+answer_grader_prompt_template = """Tu es un évaluateur de réponse.
 
-Ton rôle est de vérifier si la réponse générée répond réellement à la question utilisateur.
+Ta tâche est de vérifier si la réponse répond réellement à la question de l'utilisateur.
 
-Réponds YES si la réponse répond clairement à la question.
-Réponds NO si la réponse est trop vague, hors sujet, ou si elle dit qu'elle ne sait pas.
+Règles importantes :
+Si la question demande un élément précis, la réponse doit identifier cet élément précis, et non un élément simplement lié.
+Si la question demande une liste d’objets, d’ingrédients ou d’étapes, la réponse doit contenir les éléments principaux. Si des éléments importants sont absents, réponds "no".
+Si la réponse confond deux notions différentes, réponds "no".
+- Ignore complètement les éléments de style, de persona ou d'humour.
+  Exemples : "Miaou", "Hmmm", "Psss", "mrrr", "purr", "BOOOOOM", emojis, phrases humoristiques.
+- Ignore les formules d'introduction ou de conclusion.
+- Évalue uniquement le contenu informatif de la réponse.
+- Réponds "yes" si la réponse contient l'information principale demandée par la question, même si le style est fantaisiste.
+- Réponds "yes" si la réponse est partielle mais couvre clairement le cœur de la question.
+- Réponds "no" seulement si la réponse est hors sujet, vide, trop vague, ou ne répond pas à la question.
 
-Tu dois répondre uniquement par YES ou NO.
-
-Question utilisateur:
+Question :
 {question}
 
-Réponse générée:
+Réponse :
 {generation}
 
-Réponse:
+La réponse répond-elle à la question ?
+Réponds uniquement par "yes" ou "no".
 """
 
 answer_grader_prompt = PromptTemplate.from_template(answer_grader_prompt_template)
@@ -515,11 +571,18 @@ class GraphState(TypedDict):
         - "hyde": hypothetical document generated by HyDE
     """
 
+    raw_question: str
+    user_question: str
+    persona_prompt: str
+    
     question: str
     retrieval_query: str
     documents: List[Document]
     generation: Optional[str]
 
+    generation_is_grounded: Optional[bool]
+    generation_answers_question: Optional[bool]
+    
     query_strategy: str
     multi_queries: Optional[List[str]]
     hyde_query: Optional[str]
@@ -566,8 +629,9 @@ def retrieve(state: GraphState) -> GraphState:
     multi_queries = state.get("multi_queries")
 
     print(f"Query strategy: {query_strategy}", flush=True)
-    print(f"Original question: {question}", flush=True)
-    print(f"Retrieval query: {retrieval_query}", flush=True)
+    print(f"User question: {question}")
+    print(f"Persona prompt detected: {bool(state.get('persona_prompt'))}")
+    print(f"Retrieval query: {retrieval_query}")
 
     if query_strategy == "multi_query":
         if not multi_queries:
@@ -706,6 +770,7 @@ def generate(state: GraphState) -> GraphState:
     context = format_docs(documents)
 
     generation = generation_chain.invoke({
+        "persona_prompt": state.get("persona_prompt", ""),
         "question": question,
         "context": context,
     })
@@ -713,6 +778,10 @@ def generate(state: GraphState) -> GraphState:
     # Remove possible fake citations generated by the LLM.
     generation = re.sub(r"\n?\s*Source\s*:\s*\[Document\s*\d+\]\s*$", "", generation).strip()
     generation = re.sub(r"\n?\s*Sources\s*:\s*\[Document\s*\d+\]\s*$", "", generation).strip()
+
+    print("\n--- GENERATED ANSWER ---", flush=True)
+    print(f"Strategy: {query_strategy}", flush=True)
+    print(generation, flush=True)
 
     return {
         **state,
@@ -723,6 +792,21 @@ def generate(state: GraphState) -> GraphState:
         "query_strategy": query_strategy,
     }
 
+
+def refuse_answer(state: GraphState) -> GraphState:
+    """
+    Replace an ungrounded final generation with a safe refusal answer.
+    """
+
+    print("---REFUSE ANSWER---")
+    print("Final generation was not grounded. Returning refusal instead.", flush=True)
+
+    return {
+        **state,
+        "generation": REFUSAL_ANSWER,
+        "generation_is_grounded": False,
+        "generation_answers_question": False,
+    }
 
 # =============================================================================
 # Conditional edges
@@ -766,6 +850,7 @@ def grade_generation_v_documents_and_question(state: GraphState) -> str:
     """
     Check if generation is grounded in documents and answers the original question.
     If not, try the next query translation strategy.
+    If no strategy remains, return a refusal instead of an unverified generation.
     """
 
     print("---CHECK GENERATION QUALITY---", flush=True)
@@ -774,10 +859,10 @@ def grade_generation_v_documents_and_question(state: GraphState) -> str:
     documents = state["documents"]
     generation = state["generation"]
 
-    # If no documents are available, stop.
+    # If no documents are available, refuse.
     if not documents:
-        print("---NO DOCUMENTS AVAILABLE, END---", flush=True)
-        return "end"
+        print("---NO DOCUMENTS AVAILABLE, REFUSE---", flush=True)
+        return "refuse"
 
     # 1. Hallucination check.
     grounded = grade_hallucination(documents, generation)
@@ -798,8 +883,11 @@ def grade_generation_v_documents_and_question(state: GraphState) -> str:
             )
             return next_route
 
-        print("---DECISION: NO MORE QUERY TRANSLATION STRATEGY, END---", flush=True)
-        return "end"
+        print(
+            "---DECISION: NO MORE QUERY TRANSLATION STRATEGY, REFUSE---",
+            flush=True,
+        )
+        return "refuse"
 
     print("---DECISION: GENERATION IS GROUNDED IN DOCUMENTS---", flush=True)
 
@@ -822,8 +910,11 @@ def grade_generation_v_documents_and_question(state: GraphState) -> str:
         )
         return next_route
 
-    print("---DECISION: NO MORE QUERY TRANSLATION STRATEGY, END---", flush=True)
-    return "end"
+    print(
+        "---DECISION: NO MORE QUERY TRANSLATION STRATEGY, REFUSE---",
+        flush=True,
+    )
+    return "refuse"
 
 
 # =============================================================================
@@ -837,6 +928,7 @@ workflow.add_node("grade_documents", grade_documents)
 workflow.add_node("transform_query", transform_query)
 workflow.add_node("transform_query_hyde", transform_query_hyde)
 workflow.add_node("generate", generate)
+workflow.add_node("refuse_answer", refuse_answer)
 
 workflow.add_edge(START, "retrieve")
 workflow.add_edge("retrieve", "grade_documents")
@@ -861,10 +953,11 @@ workflow.add_conditional_edges(
         "useful": END,
         "transform_query": "transform_query",
         "transform_query_hyde": "transform_query_hyde",
-        "end": END,
+        "refuse": "refuse_answer",
     },
 )
 
+workflow.add_edge("refuse_answer", END)
 app = workflow.compile()
 
 
@@ -872,17 +965,32 @@ app = workflow.compile()
 # Public API for the chatbot
 # =============================================================================
 
-def build_initial_state(question: str) -> GraphState:
+def build_initial_state(raw_question: str):
     """
-    Build the initial state for the Self-RAG workflow from a simple user question.
-    The user only provides the question; all other fields are internal state variables.
+    Build the initial state for the Self-RAG workflow.
+
+    The frontend may send a full prompt containing both persona instructions
+    and the real user question. We split them here so retrieval only uses
+    the real user question.
     """
 
+    persona_prompt, user_question = split_persona_and_user_question(raw_question)
+
     return {
-        "question": question,
-        "retrieval_query": question,
+        "raw_question": raw_question,
+        "user_question": user_question,
+        "persona_prompt": persona_prompt,
+
+        # Keep this key for compatibility with the existing workflow.
+        # From now on, state["question"] is the clean user question.
+        "question": user_question,
+        "retrieval_query": user_question,
+
         "documents": [],
         "generation": None,
+        
+        "generation_is_grounded": None,
+        "generation_answers_question": None,
 
         "query_strategy": "standard",
         "multi_queries": None,
@@ -963,7 +1071,7 @@ def ask_with_self_rag(question: str, show_steps: bool = True) -> str:
     if not answer:
         return "Je suis désolé, mais je n'ai pas pu générer de réponse."
 
-    if "l'information n'est pas dans les documents fournis" not in answer.lower():
+    if answer != REFUSAL_ANSWER and "l'information n'est pas dans les documents fournis" not in answer.lower():
         answer = answer + format_sources(documents)
 
     return answer

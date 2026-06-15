@@ -1,0 +1,155 @@
+1. ❌ Sometimes the system randomly chooses between `la fiole d'eau` and `poudre de Blaze`, but the correct answer should be `la fiole d'eau`.
+
+Quel est l'ingrédient de base indispensable pour l'alchimie dans Minecraft ?
+
+* 39s
+
+2. ✅
+
+À quoi sert la poudre de Blaze dans le fonctionnement de l’alambic ?
+
+* 38s
+
+3.✅
+
+Comment peut-on obtenir ou remplir une fiole d’eau ?
+
+* 40s
+
+4. ✅
+
+Quelle est la différence entre une potion normale, une potion jetable et une potion persistante ?
+
+* 38s
+
+5.❌It addresses gunpowder and dragon's breath, but this primarily changes the potion's form, not its effect or duration. The correct points should be: redstone extends the duration, glowstone dust enhances the effect, and fermented spider eyes alter or reverse the effect. The Minecraft Wiki also lists redstone for extension, glowstone for enhancement, gunpowder for splash damage, and dragon's breath for lingering effects.
+
+Quels ingrédients permettent de modifier les effets ou la durée d’une potion ?
+
+* 38s
+
+6.❌ This is a list-type question where all correct items should be included. The answer is relevant, but incomplete. It misses: `poudre de Blaze`.
+
+Comment fabriquer une potion de Force dans Minecraft ?
+
+* 37s
+
+7.✅
+
+Quelle est l’utilité d’un chaudron dans le système d’alchimie ?
+
+* 38s
+
+8.🟡✅It is acceptable as "principales étapes", but incomplete.
+
+Quelles sont les étapes principales pour préparer une potion dans un alambic ?
+
+* 41s
+
+9. 🟡 This is a list-type question where all correct items should be included. The answer is relevant, but incomplete. It misses: `chaudron`.
+
+Quels objets ou ingrédients sont nécessaires avant de commencer à faire de l’alchimie ?
+
+* 1m54s multi_query, better performance than that in self-RAG.ipynb
+
+10. 🟡 The answer is not cautious enough. But pretty good hyde exemple（when ollama）
+
+Est-ce qu’on peut fabriquer une potion sans verrue du Nether ? Explique pourquoi.
+
+* standard when gemini， hyde when ollama
+
+11.Reason/Explanation type✅
+Pourquoi la poudre de Blaze est-elle indispensable pour utiliser un alambic ?
+
+12.Comparison type✅
+Quelle est la différence entre la poudre de Blaze et la poudre à canon en alchimie ?
+
+
+13.True/False + Reason/Explanation type❌, the standard answer is clearly correct but the grader still evaluates it as wrong, and ultimately refuses to answer in the hyde stage.
+Vrai ou faux : la poudre de Blaze sert à transformer une potion normale en potion jetable. Explique.
+
+14.Scenario application type✅
+Je suis dans le Nether et j’ai besoin de remplir des fioles d’eau. Quel objet peut m’aider ?
+
+15.Sequential steps type✅
+Comment passer d’une potion normale à une potion jetable puis persistante ?
+
+16.Restriction/Uncertainty type🟡✅
+Est-ce que l’alambic suffit à lui seul pour fabriquer une potion ? Explique.
+
+17.✅
+Je veux lancer une potion sur un ennemi au lieu de la boire. Quel ingrédient dois-je utiliser ?
+
+
+
+-----------------------------------------------------------------------------------
+✅ Streamlit frontend and Self-RAG backend have been successfully connected
+✅ Terminal workflow output is clear and suitable for demo
+✅ Standard retrieval is stable on simple questions
+✅ Multi-query fallback can be triggered correctly
+✅ Document grading can filter out part of the noisy documents
+
+⚠️ Main issue: the persona prompt was sent into retrieval / multi-query / HyDE
+⚠️ Multi-query was polluted and generated invalid queries such as `mrrr` / `purr` / emerald trade expressions
+⚠️ HyDE can hallucinate, and the final ungrounded answer was still returned
+⚠️ Some answers passed the grader but were still incomplete
+
+->
+
+Changes:
+
+1. `persona_prompt` → used only for the final answer style
+   `user_question` → used for retrieval / grading / multi-query / HyDE
+
+2. If the final answer is not grounded, the system returns a refusal answer instead of returning an unverified generation.
+
+Results after the changes: Remaining limitations / possible improvements
+
+* Persona separation has fixed the main retrieval issue: style instructions are no longer sent to retrieval, multi-query or HyDE. Only the real user question is used for these steps.
+
+* The final refusal node also improves safety: if the final answer is still not grounded in the retrieved documents, the system refuses to answer instead of returning an unverified generation.
+
+* However, HyDE can still introduce noise because it may generate hypothetical content that is not fully reliable. A possible improvement would be to make the HyDE prompt more restrictive, for example by asking for search keywords instead of a full hypothetical answer.
+
+* Another remaining issue is answer completeness. Some answers can be grounded but still incomplete. For example, an answer may mention only part of the recipe or omit an important step.
+
+* A possible improvement would be to make the answer grader stricter, so it checks not only whether the answer is relevant, but also whether it fully answers the question.
+
+Updated pipeline structure:
+
+1. First, the system separates the frontend input into the persona_prompt and the real user_question.
+   → The persona_prompt is used only to control the final answer style.
+   → The user_question is used for retrieval, multi-query, HyDE, and grading.
+
+2. The system first performs standard retrieval using the original user_question.
+
+3. The retrieved documents are evaluated by grade_documents to check whether they are sufficiently relevant.
+
+4. If the documents are relevant enough:
+   → The system generates an answer.
+   → It checks whether the answer is grounded in the retrieved documents.
+   → It checks whether the answer actually answers the user_question.
+   → If both checks pass, the final answer is returned.
+
+5. If the documents are not relevant enough, or if the generated answer is not grounded / not useful:
+   → The system activates multi-query.
+   → It generates 3 reformulations of the user_question.
+   → Each query retrieves a small number of documents.
+   → The retrieved documents are merged and deduplicated.
+   → The merged documents are evaluated again by grade_documents.
+
+6. If the documents retrieved through multi-query are relevant enough:
+   → The system generates an answer.
+   → It checks again whether the answer is grounded and useful.
+   → If the checks pass, the final answer is returned.
+
+7. If multi-query is still insufficient:
+   → The system activates HyDE.
+   → It generates a hypothetical answer / dense query.
+   → The HyDE query is used to retrieve documents again.
+   → The retrieved documents are evaluated again.
+   → The system generates a new answer.
+
+8. If the final answer is still not grounded or does not properly answer the question:
+   → The system does not return the unverified answer.
+   → It returns a refusal answer instead.
