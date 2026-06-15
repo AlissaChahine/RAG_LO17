@@ -1,4 +1,4 @@
-1. ? Sometimes the system randomly chooses between `la fiole d'eau` and `poudre de Blaze`, but the correct answer should be `la fiole d'eau`.
+1. ❌ Sometimes the system randomly chooses between `la fiole d'eau` and `poudre de Blaze`, but the correct answer should be `la fiole d'eau`.
 
 Quel est l'ingrédient de base indispensable pour l'alchimie dans Minecraft ?
 
@@ -10,7 +10,7 @@ Quel est l'ingrédient de base indispensable pour l'alchimie dans Minecraft ?
 
 * 38s
 
-3.
+3.✅
 
 Comment peut-on obtenir ou remplir une fiole d’eau ?
 
@@ -22,42 +22,67 @@ Quelle est la différence entre une potion normale, une potion jetable et une po
 
 * 38s
 
-5.
+5.❌It addresses gunpowder and dragon's breath, but this primarily changes the potion's form, not its effect or duration. The correct points should be: redstone extends the duration, glowstone dust enhances the effect, and fermented spider eyes alter or reverse the effect. The Minecraft Wiki also lists redstone for extension, glowstone for enhancement, gunpowder for splash damage, and dragon's breath for lingering effects.
 
 Quels ingrédients permettent de modifier les effets ou la durée d’une potion ?
 
 * 38s
 
-6.
+6.❌ This is a list-type question where all correct items should be included. The answer is relevant, but incomplete. It misses: `poudre de Blaze`.
 
 Comment fabriquer une potion de Force dans Minecraft ?
 
 * 37s
 
-7.
+7.✅
 
 Quelle est l’utilité d’un chaudron dans le système d’alchimie ?
 
 * 38s
 
-8.
+8.🟡✅It is acceptable as "principales étapes", but incomplete.
 
 Quelles sont les étapes principales pour préparer une potion dans un alambic ?
 
 * 41s
 
-9. - This is a list-type question where all correct items should be included. The answer is relevant, but incomplete. It misses: `chaudron`.
+9. 🟡 This is a list-type question where all correct items should be included. The answer is relevant, but incomplete. It misses: `chaudron`.
 
 Quels objets ou ingrédients sont nécessaires avant de commencer à faire de l’alchimie ?
 
 * 1m54s multi_query, better performance than that in self-RAG.ipynb
 
-10. ? The answer is not cautious enough.
+10. 🟡 The answer is not cautious enough. But pretty good hyde exemple（when ollama）
 
 Est-ce qu’on peut fabriquer une potion sans verrue du Nether ? Explique pourquoi.
 
-* HyDE
+* standard when gemini， hyde when ollama
 
+11.Reason/Explanation type✅
+Pourquoi la poudre de Blaze est-elle indispensable pour utiliser un alambic ?
+
+12.Comparison type✅
+Quelle est la différence entre la poudre de Blaze et la poudre à canon en alchimie ?
+
+
+13.True/False + Reason/Explanation type❌, the standard answer is clearly correct but the grader still evaluates it as wrong, and ultimately refuses to answer in the hyde stage.
+Vrai ou faux : la poudre de Blaze sert à transformer une potion normale en potion jetable. Explique.
+
+14.Scenario application type✅
+Je suis dans le Nether et j’ai besoin de remplir des fioles d’eau. Quel objet peut m’aider ?
+
+15.Sequential steps type✅
+Comment passer d’une potion normale à une potion jetable puis persistante ?
+
+16.Restriction/Uncertainty type🟡✅
+Est-ce que l’alambic suffit à lui seul pour fabriquer une potion ? Explique.
+
+17.✅
+Je veux lancer une potion sur un ennemi au lieu de la boire. Quel ingrédient dois-je utiliser ?
+
+
+
+-----------------------------------------------------------------------------------
 ✅ Streamlit frontend and Self-RAG backend have been successfully connected
 ✅ Terminal workflow output is clear and suitable for demo
 ✅ Standard retrieval is stable on simple questions
