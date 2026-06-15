@@ -779,6 +779,10 @@ def generate(state: GraphState) -> GraphState:
     generation = re.sub(r"\n?\s*Source\s*:\s*\[Document\s*\d+\]\s*$", "", generation).strip()
     generation = re.sub(r"\n?\s*Sources\s*:\s*\[Document\s*\d+\]\s*$", "", generation).strip()
 
+    print("\n--- GENERATED ANSWER ---", flush=True)
+    print(f"Strategy: {query_strategy}", flush=True)
+    print(generation, flush=True)
+
     return {
         **state,
         "question": question,
