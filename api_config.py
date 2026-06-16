@@ -22,27 +22,34 @@ def _load_key_from_colab() -> str | None:
     return None
 
 
-def configure_google_api_key(env_file: str | None = ".env") -> str:
-    """Charge GOOGLE_API_KEY depuis Colab Secrets ou depuis un fichier .env local.
+def configure_google_api_key(env_file: str | None = ".env") -> tuple[str, str]:
+    """Charge GOOGLE_API_KEY et GROQ_API_KEY depuis Colab Secrets ou un fichier .env local.
 
-    La fonction commence par essayer les secrets Google Colab quand ils sont
-    disponibles, puis elle se rabat sur un fichier .env local ou sur une
-    variable d'environnement déjà définie. La clé résolue est aussi écrite dans
-    os.environ pour que LangChain et les clients Google puissent l'utiliser.
+    Écrit les clés résolues dans os.environ pour LangChain, Google et Groq.
     """
-    api_key = _load_key_from_colab()
-
-    if not api_key and env_file:
+    if env_file and os.path.exists(env_file):
         load_dotenv(env_file)
-        api_key = os.getenv("GOOGLE_API_KEY")
 
-    if not api_key:
-        api_key = os.getenv("GOOGLE_API_KEY")
+    google_key = _load_key_from_colab()
+    if not google_key:
+        google_key = os.getenv("GOOGLE_API_KEY")
 
-    if not api_key:
+    if not google_key:
         raise ValueError(
-            "GOOGLE_API_KEY non trouvée. Utilisez un secret Colab nommé GOOGLE_API_KEY ou créez un fichier .env à la racine du projet."
+            "GOOGLE_API_KEY non trouvée. Utilisez un secret Colab ou créez un fichier .env"
+        )
+    os.environ["GOOGLE_API_KEY"] = google_key
+
+    groq_key = os.getenv("GROQ_API_KEY")
+    if not groq_key:
+        pass
+
+    if groq_key:
+        os.environ["GROQ_API_KEY"] = groq_key
+    else:
+        print(
+            "WARNING: GROQ_API_KEY non trouvée dans l'environnement.",
+            flush=True,
         )
 
-    os.environ["GOOGLE_API_KEY"] = api_key
-    return api_key
+    return google_key, groq_key or ""

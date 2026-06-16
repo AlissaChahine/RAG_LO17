@@ -29,6 +29,7 @@ from langchain_classic.storage import LocalFileStore
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
+from langchain_groq import ChatGroq
 
 from api_config import configure_google_api_key
 
@@ -117,6 +118,11 @@ llm = ChatGoogleGenerativeAI(
 # Local model mainly used for graders, to reduce Gemini quota usage.
 ollama_llm = ChatOllama(
     model=OLLAMA_MODEL,
+    temperature=0,
+)
+
+groq_llm = ChatGroq(
+    model="llama-3.3-70b-versatile",  # Modèle 70 milliards de paramètres, très intelligent
     temperature=0,
 )
 
@@ -224,14 +230,8 @@ Si la réponse ne se trouve pas dans le contexte ou si tu n'es pas sûr, n'inven
 Dans ce cas, dis EXACTEMENT :
 "Je suis désolé, mais l'information n'est pas dans les documents fournis."
 
-Consignes de style/persona :
-{persona_prompt}
-
 Important :
-- Les consignes de style servent uniquement à formuler la réponse.
-- Elles ne doivent pas être utilisées comme source d'information.
 - Ne cite pas les sources toi-même : elles seront ajoutées automatiquement après ta réponse.
-- La persona doit influencer seulement le ton, pas le contenu factuel.
 - Réponds toujours en français, même si certaines consignes ou certains termes sont en anglais.
 
 Question de l'utilisateur :
@@ -295,32 +295,29 @@ def grade_one_document(question: str, document: Document) -> bool:
     return result.startswith("YES")
 
 
-hallucination_grader_prompt_template = """Tu es un évaluateur pour un système RAG.
+hallucination_grader_prompt_template = """Tu es un expert en détection d'hallucinations factuelles pour un système RAG sur Minecraft.
+Ton rôle est de vérifier si les affirmations de la réponse générée sont VRAIES par rapport aux documents fournis.
 
-Ton rôle est de vérifier si la réponse générée est bien soutenue par les documents fournis.
+Consignes d'évaluation :
+1. Une reformulation fluide, un changement de connecteurs logiques ou une synthèse de phrases NE SONT PAS des hallucinations.
+2. Vérifie uniquement le fond.
+3. Si TOUS les faits de la réponse se retrouvent dans les documents, la réponse est valide. Tu dois répondre YES.
+4. Ne réponds NO que si la réponse invente un fait inexistant.
 
-Réponds YES si la réponse est globalement fondée sur les documents.
-Réponds NO si la réponse contient des informations inventées ou non soutenues par les documents.
-Vérifie chaque affirmation factuelle.
-Si la réponse mentionne un ingrédient, un objet, une recette ou une mécanique qui n'apparaît pas dans les documents, réponds "no".
-Même si une partie de la réponse est correcte, réponds "no" si elle contient une information non supportée.
-Si la réponse tire une conclusion qui n’est pas directement soutenue par les documents, réponds "no", même si certaines parties de la réponse sont correctes.
-Tu dois répondre uniquement par YES ou NO.
-
-Documents:
+Documents :
 {documents}
 
-Réponse générée:
+Réponse générée :
 {generation}
 
-Réponse:
-"""
+Réponse (YES/NO) : """
+
 
 hallucination_grader_prompt = PromptTemplate.from_template(
     hallucination_grader_prompt_template
 )
 
-hallucination_grader = hallucination_grader_prompt | ollama_llm | StrOutputParser()
+hallucination_grader = hallucination_grader_prompt | groq_llm | StrOutputParser()
 
 
 def grade_hallucination(documents: List[Document], generation: str) -> bool:
@@ -339,7 +336,7 @@ def grade_hallucination(documents: List[Document], generation: str) -> bool:
 
     result = result.strip().upper()
 
-    return result.startswith("YES")
+    return bool(re.search(r"\bYES\b", result))
 
 
 answer_grader_prompt_template = """Tu es un évaluateur de réponse.
@@ -350,11 +347,9 @@ Règles importantes :
 Si la question demande un élément précis, la réponse doit identifier cet élément précis, et non un élément simplement lié.
 Si la question demande une liste d’objets, d’ingrédients ou d’étapes, la réponse doit contenir les éléments principaux. Si des éléments importants sont absents, réponds "no".
 Si la réponse confond deux notions différentes, réponds "no".
-- Ignore complètement les éléments de style, de persona ou d'humour.
-  Exemples : "Miaou", "Hmmm", "Psss", "mrrr", "purr", "BOOOOOM", emojis, phrases humoristiques.
 - Ignore les formules d'introduction ou de conclusion.
 - Évalue uniquement le contenu informatif de la réponse.
-- Réponds "yes" si la réponse contient l'information principale demandée par la question, même si le style est fantaisiste.
+- Réponds "yes" si la réponse contient l'information principale demandée par la question.
 - Réponds "yes" si la réponse est partielle mais couvre clairement le cœur de la question.
 - Réponds "no" seulement si la réponse est hors sujet, vide, trop vague, ou ne répond pas à la question.
 
@@ -370,7 +365,9 @@ Réponds uniquement par "yes" ou "no".
 
 answer_grader_prompt = PromptTemplate.from_template(answer_grader_prompt_template)
 
-answer_grader = answer_grader_prompt | ollama_llm | StrOutputParser()
+answer_grader = (
+    answer_grader_prompt | groq_llm.with_fallbacks([ollama_llm]) | StrOutputParser()
+)
 
 
 def grade_answer(question: str, generation: str) -> bool:
@@ -387,7 +384,7 @@ def grade_answer(question: str, generation: str) -> bool:
 
     result = result.strip().upper()
 
-    return result.startswith("YES")
+    return bool(re.search(r"\bYES\b", result))
 
 
 # =============================================================================
@@ -1045,16 +1042,39 @@ def answer_question(question: str, show_steps: bool = True) -> GraphState:
     return final_state
 
 
+persona_prompt_template = """Tu es un traducteur de style expert pour Minecraft.
+Prends la réponse factuelle fournie et réécris-la en y injectant subtilement la personnalité demandée, SANS altérer les informations techniques.
+
+Consignes de dosage du Persona (STRICTES) :
+1. Limite le roleplay à DEUX remarques maximum dans tout le texte : une petite phrase d'introduction amusante au début, et une courte remarque à la fin.
+2. Le corps de la réponse (les explications techniques) doit rester fluide, clair, direct et facile à lire. Ne mets pas de menaces ou de phrases dramatiques au milieu des instructions de jeu.
+3. Reste fun, ironique ou taquin, mais ne tombe pas dans le tragique ou le grandiloquent. Pas de descriptions d'actions physiques entre astérisques (ex: pas de *te regarde* ou *tend une main osseuse*).
+
+Consignes de la personnalité à adopter :
+{persona_prompt}
+
+Réponse factuelle d'origine :
+{generation}
+
+Réponse stylisée et dosée : """
+
+persona_chain = (
+    PromptTemplate.from_template(persona_prompt_template)
+    | groq_llm.with_fallbacks([ollama_llm])
+    | StrOutputParser()
+)
+
+
 def ask_with_self_rag(question: str, show_steps: bool = True) -> str:
-    """
-    Run the Self-RAG workflow and return only the final answer for Streamlit.
+    """Run the Self-RAG workflow and return only the final answer for Streamlit.
 
     The workflow steps are printed in the terminal when show_steps=True.
     Sources are added only after the workflow is finished, so they do not affect
     hallucination grading or answer quality grading.
     """
+    persona_prompt, user_question = split_persona_and_user_question(question)
 
-    final_state = answer_question(question, show_steps=show_steps)
+    final_state = answer_question(user_question, show_steps=show_steps)
 
     answer = final_state.get("generation")
     documents = final_state.get("documents", [])
@@ -1066,6 +1086,15 @@ def ask_with_self_rag(question: str, show_steps: bool = True) -> str:
         answer != REFUSAL_ANSWER
         and "l'information n'est pas dans les documents fournis" not in answer.lower()
     ):
+
+        if persona_prompt:
+            if show_steps:
+                print("--- APPLYING PERSONA STYLE ---")
+
+            answer = persona_chain.invoke(
+                {"persona_prompt": persona_prompt, "generation": answer}
+            )
+
         answer = answer + format_sources(documents)
 
     return answer
