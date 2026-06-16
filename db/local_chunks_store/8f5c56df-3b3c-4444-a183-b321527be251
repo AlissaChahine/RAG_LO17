@@ -1,0 +1,1 @@
+{"lc": 1, "type": "constructor", "id": ["langchain", "schema", "document", "Document"], "kwargs": {"metadata": {"source": "https://minecraft.fandom.com/fr/wiki/Villageois", "section": "Butin", "file_origin": "files/Villageois.txt"}, "page_content": "Les villageois ne donnent aucun butin \u00e0 leur mort.", "type": "Document"}}
