@@ -50,7 +50,7 @@ GEMINI_LLM_MODEL = os.getenv("GEMINI_LLM_MODEL", "gemini-2.5-flash-lite")
 # Use your installed Ollama model.
 # If your local model is qwen3:8b, set:
 # export OLLAMA_MODEL="qwen3:8b"
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 
 # =============================================================================
 
@@ -1030,7 +1030,7 @@ def build_initial_state(raw_question: str):
         "rewrite_count": 0,
         "max_rewrites": 2,
         "generation_retry_count": 0,
-        "max_generation_retries": 1,
+        "max_generation_retries": 3,
     }
 
 
