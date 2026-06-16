@@ -573,6 +573,9 @@ class GraphState(TypedDict):
     rewrite_count: int
     max_rewrites: int
 
+    generation_retry_count: int
+    max_generation_retries: int
+
 
 def get_next_query_translation_route(state: GraphState) -> Optional[str]:
     """
@@ -708,6 +711,7 @@ def transform_query(state: GraphState) -> GraphState:
         "documents": [],
         "query_strategy": "multi_query",
         "rewrite_count": rewrite_count + 1,
+        "generation_retry_count": 0,
     }
 
 
@@ -734,6 +738,7 @@ def transform_query_hyde(state: GraphState) -> GraphState:
         "documents": [],
         "query_strategy": "hyde",
         "rewrite_count": rewrite_count + 1,
+        "generation_retry_count": 0,
     }
 
 
@@ -780,6 +785,26 @@ def generate(state: GraphState) -> GraphState:
         "documents": documents,
         "generation": generation,
         "query_strategy": query_strategy,
+    }
+
+def retry_generation_same_docs(state: GraphState) -> GraphState:
+    """
+    Retry generation using the same filtered documents.
+    This is used when the answer is not grounded, but relevant documents exist.
+    """
+
+    retry_count = state.get("generation_retry_count", 0) + 1
+    max_retries = state.get("max_generation_retries", 3)
+
+    print(
+        f"---RETRY GENERATION WITH SAME DOCUMENTS ({retry_count}/{max_retries})---",
+        flush=True,
+    )
+
+    return {
+        **state,
+        "generation": None,
+        "generation_retry_count": retry_count,
     }
 
 
@@ -865,11 +890,21 @@ def grade_generation_v_documents_and_question(state: GraphState) -> str:
             flush=True,
         )
 
+        generation_retry_count = state.get("generation_retry_count", 0)
+        max_generation_retries = state.get("max_generation_retries", 3)
+
+        if generation_retry_count < max_generation_retries:
+            print(
+                "---DECISION: RETRY GENERATION WITH SAME DOCUMENTS---",
+                flush=True,
+            )
+            return "retry_generation_same_docs"
+
         next_route = get_next_query_translation_route(state)
 
         if next_route is not None:
             print(
-                f"---DECISION: TRY NEXT QUERY TRANSLATION STRATEGY: "
+                f"---DECISION: SAME DOCUMENTS FAILED, TRY NEXT QUERY TRANSLATION STRATEGY: "
                 f"{next_route.upper()}---",
                 flush=True,
             )
@@ -920,6 +955,7 @@ workflow.add_node("grade_documents", grade_documents)
 workflow.add_node("transform_query", transform_query)
 workflow.add_node("transform_query_hyde", transform_query_hyde)
 workflow.add_node("generate", generate)
+workflow.add_node("retry_generation_same_docs", retry_generation_same_docs)
 workflow.add_node("refuse_answer", refuse_answer)
 
 workflow.add_edge(START, "retrieve")
@@ -938,11 +974,14 @@ workflow.add_conditional_edges(
 workflow.add_edge("transform_query", "retrieve")
 workflow.add_edge("transform_query_hyde", "retrieve")
 
+workflow.add_edge("retry_generation_same_docs", "generate")
+
 workflow.add_conditional_edges(
     "generate",
     grade_generation_v_documents_and_question,
     {
         "useful": END,
+        "retry_generation_same_docs": "retry_generation_same_docs",
         "transform_query": "transform_query",
         "transform_query_hyde": "transform_query_hyde",
         "refuse": "refuse_answer",
@@ -950,6 +989,7 @@ workflow.add_conditional_edges(
 )
 
 workflow.add_edge("refuse_answer", END)
+
 app = workflow.compile()
 
 
@@ -986,6 +1026,8 @@ def build_initial_state(raw_question: str):
         "hyde_query": None,
         "rewrite_count": 0,
         "max_rewrites": 2,
+        "generation_retry_count": 0,
+        "max_generation_retries": 3,
     }
 
 
