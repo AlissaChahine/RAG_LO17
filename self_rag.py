@@ -275,7 +275,9 @@ Réponse:
 
 retrieval_grader_prompt = PromptTemplate.from_template(retrieval_grader_prompt_template)
 
-retrieval_grader = retrieval_grader_prompt | ollama_llm | StrOutputParser()
+retrieval_grader = (
+    retrieval_grader_prompt | groq_llm.with_fallbacks([ollama_llm]) | StrOutputParser()
+)
 
 
 def grade_one_document(question: str, document: Document) -> bool:
@@ -786,6 +788,7 @@ def generate(state: GraphState) -> GraphState:
         "generation": generation,
         "query_strategy": query_strategy,
     }
+
 
 def retry_generation_same_docs(state: GraphState) -> GraphState:
     """
