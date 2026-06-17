@@ -293,7 +293,7 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
-if question := st.chat_input(f"Pose ta question à {bot_name}..."):
+if question := st.chat_input(f"Pose ta question au {bot_name}..."):
     st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user", avatar=USER_AVATAR):
         st.markdown(question)
