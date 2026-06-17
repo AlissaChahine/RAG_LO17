@@ -1,9 +1,6 @@
-import os
-
-# Force protobuf à utiliser l'implémentation pure Python compatible avec Python 3.14
-os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 import streamlit as st
 import base64
+import os
 from chatbot import ask_minecraft_bot
 
 # =========================================================
