@@ -245,7 +245,7 @@ Réponse :
 
 llm_prompt = PromptTemplate.from_template(llm_prompt_template)
 
-generation_chain = llm_prompt | llm.with_fallbacks([ollama_llm]) | StrOutputParser()
+generation_chain = llm_prompt | llm.with_fallbacks([groq_llm.with_fallbacks([ollama_llm])]) | StrOutputParser()
 
 
 # =============================================================================
@@ -275,7 +275,7 @@ Réponse:
 
 retrieval_grader_prompt = PromptTemplate.from_template(retrieval_grader_prompt_template)
 
-retrieval_grader = retrieval_grader_prompt | ollama_llm | StrOutputParser()
+retrieval_grader = retrieval_grader_prompt | groq_llm.with_fallbacks([ollama_llm]) | StrOutputParser()
 
 
 def grade_one_document(question: str, document: Document) -> bool:
@@ -416,7 +416,7 @@ Requêtes :
 multi_query_prompt = PromptTemplate.from_template(multi_query_prompt_template)
 
 multi_query_chain = (
-    multi_query_prompt | llm.with_fallbacks([ollama_llm]) | StrOutputParser()
+    multi_query_prompt | llm.with_fallbacks([groq_llm.with_fallbacks([ollama_llm])]) | StrOutputParser()
 )
 
 
@@ -524,7 +524,7 @@ Document hypothétique dense:
 
 hyde_dense_prompt = PromptTemplate.from_template(hyde_dense_template)
 
-hyde_chain = hyde_dense_prompt | llm.with_fallbacks([ollama_llm]) | StrOutputParser()
+hyde_chain = hyde_dense_prompt | llm.with_fallbacks([groq_llm.with_fallbacks([ollama_llm])]) | StrOutputParser()
 
 
 def generate_hyde_query(question: str) -> str:
