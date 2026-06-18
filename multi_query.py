@@ -2,7 +2,6 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from operator import itemgetter
-
 from langchain_community.vectorstores import Chroma
 from langchain_classic.storage import LocalFileStore
 from langchain_classic.retrievers import MultiVectorRetriever
@@ -10,11 +9,15 @@ from langchain_core.load import dumps
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
+# Dossier contenant les embeddings des résumés de chunks
 CHROMA_DIR = "db/chroma_minecraft_multivec"
+# Dossier contenant les chunks originaux
 STORE_DIR = "db/local_chunks_store"
 
 
 def _build_retriever(embeddings):
+    """Construit le retriever multi-vecteur : recherche sur les résumés dans Chroma,
+    puis résolution vers les chunks complets """
     vectorstore = Chroma(
         collection_name="minecraft_summaries",
         persist_directory=CHROMA_DIR,
@@ -29,10 +32,13 @@ def _build_retriever(embeddings):
 
 
 def _get_unique_union(lists_of_docs):
+    """Fusionne les listes de documents renvoyées pour chaque reformulation de la question
+    avec suppression des doublons"""
     seen = set()
     unique = []
     for docs in lists_of_docs:
         for doc in docs:
+            # Sérialisation du document
             key = dumps(doc)
             if key not in seen:
                 seen.add(key)
@@ -41,6 +47,7 @@ def _get_unique_union(lists_of_docs):
 
 
 def _format_docs(docs):
+    """Concatène les documents récupérés en un bloc de contexte"""
     parts = []
     for doc in docs:
         source = doc.metadata.get("source", "inconnu")
@@ -48,16 +55,18 @@ def _format_docs(docs):
     return "\n\n".join(parts)
 
 
+# Prompt pour la méthode multi-query
 _MULTI_QUERY_PROMPT = ChatPromptTemplate.from_template("""
-Tu es un assistant expert Minecraft. Ta tâche est de générer 5 reformulations différentes
+Tu es un assistant expert Minecraft. Ta tâche est de générer 3 reformulations différentes
 de la question ci-dessous afin d'améliorer la recherche dans une base vectorielle.
 Chaque reformulation doit aborder la question sous un angle légèrement différent
 (synonymes, niveau d'abstraction, point de vue).
-Renvoie uniquement les 5 questions, une par ligne, sans numérotation ni commentaire.
+Renvoie uniquement les 3 questions, une par ligne, sans numérotation ni commentaire.
 
 Question originale : {question}
 """)
 
+# Prompt final : génère la réponse à partir du contexte récupéré 
 _ANSWER_PROMPT = ChatPromptTemplate.from_template("""
 Tu es un expert du jeu Minecraft. Réponds en français à la question suivante en t'appuyant
 uniquement sur les documents fournis. Si l'information est absente, dis-le clairement.
@@ -70,9 +79,10 @@ Question : {question}
 
 
 def build_multi_query_chain(llm, embeddings):
-    """Construit et retourne la chaîne Multi-Query RAG."""
+    """Construit et retourne la chaîne Multi-Query RAG"""
     retriever = _build_retriever(embeddings)
 
+    # Étape 1 : le LLM génère 3 reformulations qu'on découpe en une liste de questions
     generate_multi_queries = (
         _MULTI_QUERY_PROMPT
         | llm
@@ -80,8 +90,11 @@ def build_multi_query_chain(llm, embeddings):
         | (lambda x: [q.strip() for q in x.strip().split("\n") if q.strip()])
     )
 
+    # Étape 2 : chaque reformulation est envoyée au retriever 
     retrieval_chain = generate_multi_queries | retriever.map() | _get_unique_union
 
+    # Étape 3 : assemblage du contexte et de la question d'origine 
+    # injectés dans le prompt de réponse final
     rag_chain = (
         {
             "context": retrieval_chain | _format_docs,
@@ -96,7 +109,7 @@ def build_multi_query_chain(llm, embeddings):
 
 
 def ask_with_multi_query(question: str, llm, embeddings) -> str:
-    """Répond à une question Minecraft via Multi-Query RAG."""
+    """Répond à une question Minecraft via Multi-Query RAG"""
     chain = build_multi_query_chain(llm, embeddings)
     return chain.invoke({"question": question})
 
@@ -108,11 +121,13 @@ if __name__ == "__main__":
 
     configure_google_api_key()
 
+    # Les embeddings restent sur Gemini quel que soit le LLM choisi pour la génération
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/gemini-embedding-2",
         task_type="retrieval_query",
     )
 
+    # Le LLM de génération est sélectionnable via la variable d'environnement LLM_PROVIDER
     provider = os.getenv("LLM_PROVIDER", "ollama")
     if provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
