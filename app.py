@@ -1,6 +1,6 @@
-import streamlit as st
 import base64
 import os
+import streamlit as st
 from chatbot import ask_minecraft_bot
 
 # =========================================================
@@ -80,15 +80,17 @@ CSS = """
     font-size: 14px;
 }
 
-/* Grille de cartes cliquables */
+/* Grille adaptative pour les cartes */
 .bot-selector {
     display: flex;
+    flex-wrap: wrap; /* Permet de passer à la ligne sur mobile */
     gap: 10px;
     justify-content: center;
     padding: 6px 0;
 }
 .bot-card {
-    flex: 1;
+    flex: 1 1 calc(25% - 10px); /* 4 colonnes par défaut */
+    min-width: 140px; /* Évite que les cartes deviennent trop petites */
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -186,7 +188,7 @@ CSS = """
 [data-testid="stChatInput"] button { background-color: #4f7a3a !important; border-radius: 4px !important; }
 [data-testid="stChatInput"] button:hover { background-color: #7ec850 !important; }
 
-/* Bouton reset */
+/* Bouton reset adaptatif */
 .reset-btn .stButton > button {
     background-color: #0d150d !important;
     color: #5a7a50 !important;
@@ -202,6 +204,24 @@ CSS = """
     color: #c8e6b0 !important;
     border-color: #4f7a3a !important;
     background-color: #1a2e1a !important;
+}
+
+/* =========================================================
+   MEDIA QUERIES (RESPONSIVE)
+   ========================================================= */
+@media (max-width: 640px) {
+    .mc-title {
+        font-size: 38px; /* Titre plus petit sur mobile */
+    }
+    .bot-card {
+        flex: 1 1 calc(50% - 10px); /* 2 colonnes sur tablette/gros mobile */
+    }
+}
+
+@media (max-width: 400px) {
+    .bot-card {
+        flex: 1 1 100%; /* 1 seule colonne sur très petits écrans */
+    }
 }
 </style>
 """
@@ -284,6 +304,8 @@ with st.expander(f"Changer de guide [actif : {bot_name}]", expanded=False):
         </a>"""
     cards_html += "</div>"
     st.markdown(cards_html, unsafe_allow_html=True)
+
+
 # =========================================================
 # CHAT
 # =========================================================
@@ -310,16 +332,3 @@ if question := st.chat_input(f"Pose ta question au {bot_name}..."):
         st.markdown(answer)
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
-
-# =========================================================
-# RESET
-# =========================================================
-
-st.markdown("<br>", unsafe_allow_html=True)
-_, col_reset, _ = st.columns([3, 1, 3])
-with col_reset:
-    st.markdown('<div class="reset-btn">', unsafe_allow_html=True)
-    if st.button("Nouvelle conversation", key="reset"):
-        switch_bot(bot_name)
-        st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
