@@ -629,7 +629,6 @@ def retrieve(state: GraphState) -> GraphState:
 
     print(f"Query strategy: {query_strategy}", flush=True)
     print(f"User question: {question}")
-    print(f"Persona prompt detected: {bool(state.get('persona_prompt'))}")
     print(f"Retrieval query: {retrieval_query}")
 
     if query_strategy == "multi_query":
